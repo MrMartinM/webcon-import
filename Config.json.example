@@ -1,0 +1,18 @@
+{
+  "Webcon": {
+    "BaseUrl": "https://your-webcon-instance.com",
+    "ClientId": "your-client-id-here",
+    "ClientSecret": "",
+    "DatabaseId": "9"
+  },
+  "Excel": {
+    "FilePath": "C:\\data\\workflows.xlsx",
+    "StartRow": 2
+  },
+  "StatusFile": "",
+  "Retry": {
+    "MaxRetries": 3,
+    "RetryDelayBase": 2
+  }
+}
+

@@ -1,0 +1,316 @@
+# Start-WebconWorkflows.ps1
+# Main script to read Excel file and start Webcon workflows for each row
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$ConfigPath = ".\Config.json"
+)
+
+# Import modules
+$modulePath = Join-Path $PSScriptRoot "Modules"
+Import-Module (Join-Path $modulePath "ExcelReader.psm1") -Force
+Import-Module (Join-Path $modulePath "WebconAPI.psm1") -Force
+Import-Module (Join-Path $modulePath "StatusTracker.psm1") -Force
+
+# Load configuration
+if (-not (Test-Path $ConfigPath)) {
+    throw "Configuration file not found: $ConfigPath"
+}
+
+$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+
+Write-Host "Starting Webcon workflow automation..." -ForegroundColor Green
+Write-Host "Excel file: $($config.Excel.FilePath)" -ForegroundColor Cyan
+Write-Host "Webcon URL: $($config.Webcon.BaseUrl)" -ForegroundColor Cyan
+
+# Determine status file path
+$statusFile = if ($config.StatusFile) {
+    $config.StatusFile
+} else {
+    $excelDir = Split-Path -Path $config.Excel.FilePath -Parent
+    $excelName = [System.IO.Path]::GetFileNameWithoutExtension($config.Excel.FilePath)
+    Join-Path $excelDir "$excelName.status.csv"
+}
+
+Write-Host "Status file: $statusFile" -ForegroundColor Cyan
+
+# Get retry settings
+$maxRetries = if ($config.Retry.MaxRetries) { $config.Retry.MaxRetries } else { 3 }
+$retryDelayBase = if ($config.Retry.RetryDelayBase) { $config.Retry.RetryDelayBase } else { 2 }
+
+# Step 1: Load import status
+Write-Host "`nLoading import status..." -ForegroundColor Yellow
+$importStatus = Get-ImportStatus -StatusFile $statusFile
+$alreadyImportedCount = ($importStatus.Values | Where-Object { $_.Status -eq "Success" }).Count
+if ($alreadyImportedCount -gt 0) {
+    Write-Host "Found $alreadyImportedCount already imported rows" -ForegroundColor Green
+}
+
+# Step 2: Read workflow configuration from Excel Mapping-Workflow sheet
+Write-Host "`nReading workflow configuration from Excel Mapping-Workflow sheet..." -ForegroundColor Yellow
+$workflowConfig = Read-WorkflowMapping -FilePath $config.Excel.FilePath -StartRow $config.Excel.StartRow
+Write-Host "Workflow Guid: $($workflowConfig.WorkflowGuid)" -ForegroundColor Green
+Write-Host "Form Type Guid: $($workflowConfig.FormTypeGuid)" -ForegroundColor Green
+
+# Step 3: Read field mappings from Excel Mapping-Fields sheet
+Write-Host "`nReading field mappings from Excel Mapping-Fields sheet..." -ForegroundColor Yellow
+$mappings = Read-MappingSheet -FilePath $config.Excel.FilePath -StartRow $config.Excel.StartRow
+Write-Host "Found $($mappings.Count) field mappings" -ForegroundColor Green
+
+# Step 4: Get client secret from environment variable or config
+$clientSecret = if ($config.Webcon.ClientSecret -and $config.Webcon.ClientSecret.Trim() -ne "") {
+    $config.Webcon.ClientSecret
+} else {
+    $env:WEBCON_CLIENT_SECRET
+}
+
+if (-not $clientSecret -or $clientSecret.Trim() -eq "") {
+    throw "ClientSecret not found. Please set WEBCON_CLIENT_SECRET environment variable or provide it in Config.json"
+}
+
+# Step 5: Authenticate
+Write-Host "`nAuthenticating with Webcon..." -ForegroundColor Yellow
+$accessToken = Get-WebconToken -BaseUrl $config.Webcon.BaseUrl `
+                                -ClientId $config.Webcon.ClientId `
+                                -ClientSecret $clientSecret
+Write-Host "Authentication successful!" -ForegroundColor Green
+
+# Step 6: Read data from Excel Data sheet
+Write-Host "`nReading data from Excel Data sheet..." -ForegroundColor Yellow
+$rows = Read-ExcelFile -FilePath $config.Excel.FilePath -WorksheetName "Data" -StartRow $config.Excel.StartRow
+Write-Host "Found $($rows.Count) rows to process" -ForegroundColor Green
+
+# Step 7: Process each row
+$successCount = 0
+$errorCount = 0
+$skippedCount = 0
+$errors = @()
+
+$rowIndex = 0
+foreach ($row in $rows) {
+    $rowIndex++
+    
+    # Generate row ID - check for ID column first, otherwise use row index
+    $rowId = if ($row.PSObject.Properties.Name -contains "ID" -and $null -ne $row.ID) {
+        $row.ID.ToString()
+    } else {
+        $rowIndex.ToString()
+    }
+    
+    # Check if row is already imported
+    if (IsRowImported -StatusTable $importStatus -RowId $rowId) {
+        Write-Host "`nRow $rowId already imported, skipping..." -ForegroundColor Gray
+        $skippedCount++
+        continue
+    }
+    
+    Write-Host "`nProcessing row $rowId..." -ForegroundColor Yellow
+    
+    try {
+        # Build form fields from Excel mappings
+        $formFields = @()
+        foreach ($fieldMapping in $mappings) {
+            $excelValue = $row.($fieldMapping.ExcelColumn)
+            
+            if ($null -ne $excelValue) {
+                # Detect field type based on field name pattern
+                $isChoiceField = $false
+                $isBooleanField = $false
+                $isDateTimeField = $false
+                $isIntegerField = $false
+                $isDecimalField = $false
+                
+                # Check if field name indicates a choice field (e.g., WFD_AttChoose2)
+                if ($fieldMapping.FieldName -match "Choose" -or $fieldMapping.FieldName -match "Choice") {
+                    $isChoiceField = $true
+                    Write-Host "  Detected choice field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                }
+                
+                # Check if field name indicates a boolean field (e.g., WFD_AttBool1)
+                if ($fieldMapping.FieldName -match "AttBool") {
+                    $isBooleanField = $true
+                    Write-Host "  Detected boolean field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                }
+                
+                # Check if field name indicates a datetime field (e.g., WFD_AttDateTime2)
+                if ($fieldMapping.FieldName -match "AttDateTime") {
+                    $isDateTimeField = $true
+                    Write-Host "  Detected datetime field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                }
+                
+                # Check if field name indicates an integer field (e.g., WFD_AttInt1)
+                if ($fieldMapping.FieldName -match "AttInt") {
+                    $isIntegerField = $true
+                    Write-Host "  Detected integer field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                }
+                
+                # Check if field name indicates a decimal field (e.g., WFD_AttDecimal7)
+                if ($fieldMapping.FieldName -match "AttDecimal") {
+                    $isDecimalField = $true
+                    Write-Host "  Detected decimal field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                }
+                
+                # Check for optional IsChoice column in mapping
+                if ($fieldMapping.PSObject.Properties.Name -contains "IsChoice") {
+                    $isChoiceColumn = $fieldMapping.IsChoice
+                    if ($isChoiceColumn -eq "Yes" -or $isChoiceColumn -eq "True" -or $isChoiceColumn -eq $true -or $isChoiceColumn -eq 1) {
+                        $isChoiceField = $true
+                        Write-Host "  Explicitly marked as choice field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                    }
+                }
+                
+                # Build base form field structure with specific order: guid, type, svalue, name, formLayout, value
+                $excelValueStr = $excelValue.ToString()
+                
+                # Determine the value field based on field type
+                $fieldValue = $null
+                
+                if ($isChoiceField) {
+                    # Handle choice fields - value must be an array
+                    # Check if value is in format "id#name" or just a single value
+                    if ($excelValueStr -match "^\s*([^#]+)\s*#\s*(.+)\s*$") {
+                        # Format: "id#name"
+                        $choiceId = $matches[1].Trim()
+                        $choiceName = $matches[2].Trim()
+                        Write-Host "  Choice field value: id='$choiceId', name='$choiceName'" -ForegroundColor Gray
+                    } else {
+                        # Single value - use as id, leave name blank
+                        $choiceId = $excelValueStr.Trim()
+                        $choiceName = ""
+                        Write-Host "  Choice field value: id='$choiceId', name='' (blank)" -ForegroundColor Gray
+                    }
+                    
+                    $fieldValue = @(
+                        @{
+                            id = $choiceId
+                            name = $choiceName
+                        }
+                    )
+                }
+                elseif ($isBooleanField) {
+                    # Handle boolean fields - value must be boolean
+                    if ($excelValue -is [bool]) {
+                        $fieldValue = $excelValue
+                    } elseif ($excelValueStr -match "^(true|1|yes|y)$" -or $excelValueStr -eq "1") {
+                        $fieldValue = $true
+                    } elseif ($excelValueStr -match "^(false|0|no|n)$" -or $excelValueStr -eq "0") {
+                        $fieldValue = $false
+                    } else {
+                        # Try to parse as boolean
+                        $fieldValue = [System.Convert]::ToBoolean($excelValue)
+                    }
+                    Write-Host "  Boolean field value: $fieldValue" -ForegroundColor Gray
+                }
+                elseif ($isDateTimeField) {
+                    # Handle datetime fields - value must be ISO 8601 string
+                    try {
+                        if ($excelValue -is [DateTime]) {
+                            $fieldValue = $excelValue.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                        } else {
+                            # Try to parse the string as DateTime
+                            $dateTime = [DateTime]::Parse($excelValueStr)
+                            $fieldValue = $dateTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                        }
+                        Write-Host "  DateTime field value: $fieldValue" -ForegroundColor Gray
+                    } catch {
+                        Write-Host "  Warning: Could not parse datetime value '$excelValueStr', using as string" -ForegroundColor Yellow
+                        $fieldValue = $excelValueStr
+                    }
+                }
+                elseif ($isIntegerField) {
+                    # Handle integer fields - value must be integer
+                    try {
+                        $fieldValue = [int]$excelValue
+                        Write-Host "  Integer field value: $fieldValue" -ForegroundColor Gray
+                    } catch {
+                        Write-Host "  Warning: Could not parse integer value '$excelValueStr', using 0" -ForegroundColor Yellow
+                        $fieldValue = 0
+                    }
+                }
+                elseif ($isDecimalField) {
+                    # Handle decimal fields - value must be decimal
+                    try {
+                        $fieldValue = [decimal]$excelValue
+                        Write-Host "  Decimal field value: $fieldValue" -ForegroundColor Gray
+                    } catch {
+                        Write-Host "  Warning: Could not parse decimal value '$excelValueStr', using 0" -ForegroundColor Yellow
+                        $fieldValue = [decimal]0
+                    }
+                }
+                else {
+                    # Regular field - value is a string
+                    $fieldValue = $excelValueStr
+                    Write-Host "  Regular field '$($fieldMapping.FieldName)': '$excelValueStr'" -ForegroundColor Gray
+                }
+                
+                # Build form field with ordered properties
+                $formField = [ordered]@{
+                    guid     = $fieldMapping.FieldGuid
+                    type     = $fieldMapping.FieldType
+                    svalue   = $excelValueStr
+                    name     = $fieldMapping.FieldName
+                    formLayout = @{
+                        editability  = "Editable"
+                        requiredness = "Optional"
+                    }
+                    value    = $fieldValue
+                }
+                
+                $formFields += $formField
+            }
+        }
+        
+        # Start workflow with retry logic (one API call per row)
+        $result = Start-WebconWorkflowWithRetry -BaseUrl $config.Webcon.BaseUrl `
+                                                  -AccessToken $accessToken `
+                                                  -DatabaseId $config.Webcon.DatabaseId `
+                                                  -WorkflowGuid $workflowConfig.WorkflowGuid `
+                                                  -FormTypeGuid $workflowConfig.FormTypeGuid `
+                                                  -FormFields $formFields `
+                                                  -Path $workflowConfig.Path `
+                                                  -Mode $workflowConfig.Mode `
+                                                  -MaxRetries $maxRetries `
+                                                  -RetryDelayBase $retryDelayBase
+        
+        # Update status to Success
+        Update-ImportStatus -StatusFile $statusFile -RowId $rowId -Status "Success"
+        
+        Write-Host "Workflow started successfully!" -ForegroundColor Green
+        $successCount++
+    }
+    catch {
+        $errorMsg = $_.Exception.Message
+        Write-Host "Error processing row $rowId : $errorMsg" -ForegroundColor Red
+        
+        # Update status to Error
+        Update-ImportStatus -StatusFile $statusFile -RowId $rowId -Status "Error" -ErrorMessage $errorMsg
+        
+        $errors += @{
+            RowId = $rowId
+            Row = $row
+            Error = $errorMsg
+        }
+        $errorCount++
+    }
+}
+
+# Summary
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "Processing Complete!" -ForegroundColor Green
+Write-Host "Successful: $successCount" -ForegroundColor Green
+Write-Host "Skipped (already imported): $skippedCount" -ForegroundColor $(if ($skippedCount -gt 0) { "Yellow" } else { "Gray" })
+Write-Host "Errors: $errorCount" -ForegroundColor $(if ($errorCount -gt 0) { "Red" } else { "Green" })
+Write-Host "Total processed: $($successCount + $errorCount)" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+
+if ($errors.Count -gt 0) {
+    Write-Host "`nErrors:" -ForegroundColor Red
+    $errors | ForEach-Object {
+        Write-Host "  Row $($_.RowId): $($_.Error)" -ForegroundColor Red
+    }
+}
+
+Write-Host "`nStatus file: $statusFile" -ForegroundColor Cyan
+Write-Host "You can rerun this script to retry failed rows or continue from where you left off." -ForegroundColor Gray
+

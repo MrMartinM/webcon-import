@@ -1,0 +1,23 @@
+# Sensitive configuration files
+Config.json
+
+# Excel files
+*.xlsx
+*.xls
+
+# PowerShell temporary files
+*.tmp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Backup files
+*.bak
+*~
+
