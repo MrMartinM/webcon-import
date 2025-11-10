@@ -145,13 +145,22 @@ function Start-WebconWorkflow {
     }
     
     try {
+        # Convert to JSON with proper UTF-8 encoding
         $jsonBody = $body | ConvertTo-Json -Depth 10
-        Write-Host "Request JSON:" -ForegroundColor Cyan
-        Write-Host $jsonBody -ForegroundColor Gray
         
-        # Use Invoke-WebRequest instead of Invoke-RestMethod to get better error handling
+        # Ensure the JSON string is properly UTF-8 encoded
+        # Convert to UTF-8 bytes to handle special characters correctly
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        $jsonBytes = $utf8NoBom.GetBytes($jsonBody)
+        $jsonBodyUtf8 = $utf8NoBom.GetString($jsonBytes)
+        
+        Write-Host "Request JSON:" -ForegroundColor Cyan
+        Write-Host $jsonBodyUtf8 -ForegroundColor Gray
+        
+        # Use Invoke-WebRequest with UTF-8 encoded bytes to ensure proper encoding
+        # This prevents encoding issues with special characters like ø (byte F8)
         try {
-            $webRequest = Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -Body $jsonBody -ContentType "application/json" -UseBasicParsing
+            $webRequest = Invoke-WebRequest -Uri $uri -Method Post -Headers $headers -Body $jsonBytes -ContentType "application/json; charset=utf-8" -UseBasicParsing
             $response = $webRequest.Content | ConvertFrom-Json
             return $response
         }

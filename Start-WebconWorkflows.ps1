@@ -161,10 +161,27 @@ foreach ($row in $rows) {
                 }
                 
                 # Build base form field structure with specific order: guid, type, svalue, name, formLayout, value
-                $excelValueStr = $excelValue.ToString()
+                # Convert to string and ensure proper UTF-8 encoding
+                $excelValueStr = if ($null -ne $excelValue) { 
+                    $excelValue.ToString() 
+                } else { 
+                    "" 
+                }
+                
+                # Normalize string: clean and ensure valid encoding
+                # Remove only problematic control characters that could break JSON serialization
+                if ($excelValueStr.Length -gt 0) {
+                    # Remove null bytes (these can cause JSON parsing errors)
+                    $excelValueStr = $excelValueStr -replace "`0", ""
+                    # Remove other control characters that could break JSON, but keep newlines, tabs, and carriage returns
+                    # Keep: \n (0x0A), \r (0x0D), \t (0x09)
+                    # Remove: other control chars (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F)
+                    $excelValueStr = $excelValueStr -replace "[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", ""
+                }
                 
                 # Determine the value field based on field type
                 $fieldValue = $null
+                $svalueStr = $null  # Will be set based on field type
                 
                 if ($isChoiceField) {
                     # Handle choice fields - value must be an array
@@ -187,6 +204,7 @@ foreach ($row in $rows) {
                             name = $choiceName
                         }
                     )
+                    $svalueStr = $excelValueStr  # Keep original string for svalue
                 }
                 elseif ($isBooleanField) {
                     # Handle boolean fields - value must be boolean
@@ -198,8 +216,14 @@ foreach ($row in $rows) {
                         $fieldValue = $false
                     } else {
                         # Try to parse as boolean
-                        $fieldValue = [System.Convert]::ToBoolean($excelValue)
+                        try {
+                            $fieldValue = [System.Convert]::ToBoolean($excelValue)
+                        } catch {
+                            $fieldValue = $false
+                        }
                     }
+                    # For boolean fields, svalue should be empty string (API doesn't expect string representation)
+                    $svalueStr = ""
                     Write-Host "  Boolean field value: $fieldValue" -ForegroundColor Gray
                 }
                 elseif ($isDateTimeField) {
@@ -212,35 +236,42 @@ foreach ($row in $rows) {
                             $dateTime = [DateTime]::Parse($excelValueStr)
                             $fieldValue = $dateTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
                         }
+                        $svalueStr = $fieldValue  # Use ISO string for svalue
                         Write-Host "  DateTime field value: $fieldValue" -ForegroundColor Gray
                     } catch {
                         Write-Host "  Warning: Could not parse datetime value '$excelValueStr', using as string" -ForegroundColor Yellow
                         $fieldValue = $excelValueStr
+                        $svalueStr = $excelValueStr
                     }
                 }
                 elseif ($isIntegerField) {
                     # Handle integer fields - value must be integer
                     try {
                         $fieldValue = [int]$excelValue
+                        $svalueStr = $fieldValue.ToString()  # String representation for svalue
                         Write-Host "  Integer field value: $fieldValue" -ForegroundColor Gray
                     } catch {
                         Write-Host "  Warning: Could not parse integer value '$excelValueStr', using 0" -ForegroundColor Yellow
                         $fieldValue = 0
+                        $svalueStr = "0"
                     }
                 }
                 elseif ($isDecimalField) {
                     # Handle decimal fields - value must be decimal
                     try {
                         $fieldValue = [decimal]$excelValue
+                        $svalueStr = $fieldValue.ToString()  # String representation for svalue
                         Write-Host "  Decimal field value: $fieldValue" -ForegroundColor Gray
                     } catch {
                         Write-Host "  Warning: Could not parse decimal value '$excelValueStr', using 0" -ForegroundColor Yellow
                         $fieldValue = [decimal]0
+                        $svalueStr = "0"
                     }
                 }
                 else {
                     # Regular field - value is a string
                     $fieldValue = $excelValueStr
+                    $svalueStr = $excelValueStr
                     Write-Host "  Regular field '$($fieldMapping.FieldName)': '$excelValueStr'" -ForegroundColor Gray
                 }
                 
@@ -248,7 +279,7 @@ foreach ($row in $rows) {
                 $formField = [ordered]@{
                     guid     = $fieldMapping.FieldGuid
                     type     = $fieldMapping.FieldType
-                    svalue   = $excelValueStr
+                    svalue   = $svalueStr
                     name     = $fieldMapping.FieldName
                     formLayout = @{
                         editability  = "Editable"
