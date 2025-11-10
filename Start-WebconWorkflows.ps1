@@ -47,6 +47,9 @@ if ($alreadyImportedCount -gt 0) {
     Write-Host "Found $alreadyImportedCount already imported rows" -ForegroundColor Green
 }
 
+# Write start metadata to status file
+Write-StartMetadata -StatusFile $statusFile
+
 # Step 2: Read workflow configuration from Excel Mapping-Workflow sheet
 Write-Host "`nReading workflow configuration from Excel Mapping-Workflow sheet..." -ForegroundColor Yellow
 $workflowConfig = Read-WorkflowMapping -FilePath $config.Excel.FilePath -StartRow $config.Excel.StartRow
@@ -87,6 +90,10 @@ $errorCount = 0
 $skippedCount = 0
 $errors = @()
 
+# Calculate total rows to process (for progress tracking)
+$totalRows = $rows.Count
+$processedRows = 0
+
 $rowIndex = 0
 foreach ($row in $rows) {
     $rowIndex++
@@ -100,7 +107,9 @@ foreach ($row in $rows) {
     
     # Check if row is already imported
     if (IsRowImported -StatusTable $importStatus -RowId $rowId) {
-        Write-Host "`nRow $rowId already imported, skipping..." -ForegroundColor Gray
+        $processedRows++
+        $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
+        Write-Host "`nRow $rowId already imported, skipping... ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Gray
         $skippedCount++
         continue
     }
@@ -307,12 +316,17 @@ foreach ($row in $rows) {
         # Update status to Success
         Update-ImportStatus -StatusFile $statusFile -RowId $rowId -Status "Success"
         
-        Write-Host "Workflow started successfully!" -ForegroundColor Green
+        $processedRows++
+        $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
+        Write-Host "Workflow started successfully! ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Green
         $successCount++
     }
     catch {
         $errorMsg = $_.Exception.Message
-        Write-Host "Error processing row $rowId : $errorMsg" -ForegroundColor Red
+        
+        $processedRows++
+        $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
+        Write-Host "Error processing row $rowId : $errorMsg ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Red
         
         # Update status to Error
         Update-ImportStatus -StatusFile $statusFile -RowId $rowId -Status "Error" -ErrorMessage $errorMsg
@@ -344,4 +358,7 @@ if ($errors.Count -gt 0) {
 
 Write-Host "`nStatus file: $statusFile" -ForegroundColor Cyan
 Write-Host "You can rerun this script to retry failed rows or continue from where you left off." -ForegroundColor Gray
+
+# Write end metadata to status file
+Write-EndMetadata -StatusFile $statusFile
 
