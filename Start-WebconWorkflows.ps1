@@ -398,9 +398,36 @@ Write-Host "You can rerun this script to retry failed rows or continue from wher
 Write-EndMetadata -StatusFile $statusFile
 
 # Wait for user to close progress window
-if ($progressWindow) {
-    Write-Host "`nProgress window is open. Close it when done reviewing." -ForegroundColor Cyan
-    $progressWindow.Form.ShowDialog() | Out-Null
-    $progressWindow.Form.Dispose()
+if ($progressWindow -and $progressWindow.Form) {
+    try {
+        # Check if form is still valid and not disposed
+        if (-not $progressWindow.Form.IsDisposed) {
+            Write-Host "`nProgress window is open. Close it when done reviewing." -ForegroundColor Cyan
+            # Hide the form first since it's already visible (from Show()), then show as modal dialog
+            # This prevents the "Form that is already visible cannot be displayed as a modal dialog" error
+            if ($progressWindow.Form.Visible) {
+                $progressWindow.Form.Hide()
+            }
+            # Show as modal dialog - this will block until user closes the window
+            $progressWindow.Form.ShowDialog() | Out-Null
+        }
+    }
+    catch {
+        # If form was already closed, disposed, or other error occurred, just continue silently
+        # This can happen if user manually closed the window before script reached this point
+        Write-Verbose "Progress window handling: $($_.Exception.Message)"
+    }
+    finally {
+        # Ensure form is properly disposed
+        try {
+            if ($progressWindow.Form -and -not $progressWindow.Form.IsDisposed) {
+                $progressWindow.Form.Dispose()
+            }
+        }
+        catch {
+            # Ignore disposal errors
+            Write-Verbose "Form disposal: $($_.Exception.Message)"
+        }
+    }
 }
 
