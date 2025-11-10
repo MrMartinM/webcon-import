@@ -12,6 +12,7 @@ $modulePath = Join-Path $PSScriptRoot "Modules"
 Import-Module (Join-Path $modulePath "ExcelReader.psm1") -Force
 Import-Module (Join-Path $modulePath "WebconAPI.psm1") -Force
 Import-Module (Join-Path $modulePath "StatusTracker.psm1") -Force
+Import-Module (Join-Path $modulePath "ProgressWindow.psm1") -Force
 
 # Load configuration
 if (-not (Test-Path $ConfigPath)) {
@@ -94,6 +95,12 @@ $errors = @()
 $totalRows = $rows.Count
 $processedRows = 0
 
+# Create and show progress window (only if there are rows to process)
+$progressWindow = $null
+if ($totalRows -gt 0) {
+    $progressWindow = Show-ProgressWindow -TotalRows $totalRows
+}
+
 $rowIndex = 0
 foreach ($row in $rows) {
     $rowIndex++
@@ -107,14 +114,25 @@ foreach ($row in $rows) {
     
     # Check if row is already imported
     if (IsRowImported -StatusTable $importStatus -RowId $rowId) {
+        $skippedCount++
         $processedRows++
         $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
+        
+        # Update progress window
+        if ($progressWindow) {
+            $progressWindow.UpdateProgress($processedRows, "Row $rowId (Skipped)", $successCount, $errorCount, $skippedCount)
+        }
+        
         Write-Host "`nRow $rowId already imported, skipping... ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Gray
-        $skippedCount++
         continue
     }
     
     Write-Host "`nProcessing row $rowId..." -ForegroundColor Yellow
+    
+    # Update progress window before processing
+    if ($progressWindow) {
+        $progressWindow.UpdateProgress($processedRows, "Row $rowId (Processing...)", $successCount, $errorCount, $skippedCount)
+    }
     
     try {
         # Build form fields from Excel mappings
@@ -317,15 +335,28 @@ foreach ($row in $rows) {
         Update-ImportStatus -StatusFile $statusFile -RowId $rowId -Status "Success"
         
         $processedRows++
-        $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
-        Write-Host "Workflow started successfully! ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Green
         $successCount++
+        $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
+        
+        # Update progress window
+        if ($progressWindow) {
+            $progressWindow.UpdateProgress($processedRows, "Row $rowId (Success)", $successCount, $errorCount, $skippedCount)
+        }
+        
+        Write-Host "Workflow started successfully! ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Green
     }
     catch {
         $errorMsg = $_.Exception.Message
         
         $processedRows++
+        $errorCount++
         $progressPercent = [math]::Round(($processedRows / $totalRows) * 100, 1)
+        
+        # Update progress window
+        if ($progressWindow) {
+            $progressWindow.UpdateProgress($processedRows, "Row $rowId (Error)", $successCount, $errorCount, $skippedCount)
+        }
+        
         Write-Host "Error processing row $rowId : $errorMsg ($processedRows/$totalRows - $progressPercent%)" -ForegroundColor Red
         
         # Update status to Error
@@ -336,8 +367,12 @@ foreach ($row in $rows) {
             Row = $row
             Error = $errorMsg
         }
-        $errorCount++
     }
+}
+
+# Close progress window and enable close button
+if ($progressWindow) {
+    $progressWindow.Close()
 }
 
 # Summary
@@ -361,4 +396,11 @@ Write-Host "You can rerun this script to retry failed rows or continue from wher
 
 # Write end metadata to status file
 Write-EndMetadata -StatusFile $statusFile
+
+# Wait for user to close progress window
+if ($progressWindow) {
+    Write-Host "`nProgress window is open. Close it when done reviewing." -ForegroundColor Cyan
+    $progressWindow.Form.ShowDialog() | Out-Null
+    $progressWindow.Form.Dispose()
+}
 
