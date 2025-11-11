@@ -66,7 +66,23 @@ Write-Host "Found $($mappings.Count) field mappings" -ForegroundColor Green
 $clientSecret = if ($config.Webcon.ClientSecret -and $config.Webcon.ClientSecret.Trim() -ne "") {
     $config.Webcon.ClientSecret
 } else {
+    # First try process environment variable (current session)
     $env:WEBCON_CLIENT_SECRET
+}
+
+# If not found in process environment, try reading from User registry (persistent environment variables)
+if (-not $clientSecret -or $clientSecret.Trim() -eq "") {
+    try {
+        $userEnvKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment")
+        if ($userEnvKey) {
+            $clientSecret = $userEnvKey.GetValue("WEBCON_CLIENT_SECRET", $null)
+            $userEnvKey.Close()
+        }
+    }
+    catch {
+        # Ignore registry read errors
+        Write-Verbose "Could not read WEBCON_CLIENT_SECRET from User registry: $($_.Exception.Message)"
+    }
 }
 
 if (-not $clientSecret -or $clientSecret.Trim() -eq "") {
@@ -112,6 +128,12 @@ foreach ($row in $rows) {
         $rowIndex.ToString()
     }
     
+    # Check for cancellation
+    if ($progressWindow -and $progressWindow.IsCancelled()) {
+        Write-Host "`nImport cancelled by user. Stopping at row $rowId..." -ForegroundColor Yellow
+        break
+    }
+    
     # Check if row is already imported
     if (IsRowImported -StatusTable $importStatus -RowId $rowId) {
         $skippedCount++
@@ -127,6 +149,12 @@ foreach ($row in $rows) {
         continue
     }
     
+    # Check for cancellation again before processing
+    if ($progressWindow -and $progressWindow.IsCancelled()) {
+        Write-Host "`nImport cancelled by user. Stopping at row $rowId..." -ForegroundColor Yellow
+        break
+    }
+    
     Write-Host "`nProcessing row $rowId..." -ForegroundColor Yellow
     
     # Update progress window before processing
@@ -137,7 +165,21 @@ foreach ($row in $rows) {
     try {
         # Build form fields from Excel mappings
         $formFields = @()
+        $fieldIndex = 0
         foreach ($fieldMapping in $mappings) {
+            $fieldIndex++
+            
+            # Check for cancellation and process Windows messages periodically
+            if ($progressWindow) {
+                [System.Windows.Forms.Application]::DoEvents()
+                if ($progressWindow.IsCancelled()) {
+                    Write-Host "`nImport cancelled by user. Stopping during field mapping for row $rowId..." -ForegroundColor Yellow
+                    # Break out of field mapping loop and skip to end of row processing
+                    $formFields = @()  # Clear form fields since we're cancelling
+                    break
+                }
+            }
+            
             $excelValue = $row.($fieldMapping.ExcelColumn)
             
             if ($null -ne $excelValue) {
@@ -319,6 +361,13 @@ foreach ($row in $rows) {
             }
         }
         
+        # Check for cancellation before making API call
+        if ($progressWindow -and $progressWindow.IsCancelled()) {
+            Write-Host "`nImport cancelled by user. Stopping before processing row $rowId..." -ForegroundColor Yellow
+            # Skip the API call and break out of row processing
+            break
+        }
+        
         # Start workflow with retry logic (one API call per row)
         $result = Start-WebconWorkflowWithRetry -BaseUrl $config.Webcon.BaseUrl `
                                                   -AccessToken $accessToken `
@@ -368,21 +417,44 @@ foreach ($row in $rows) {
             Error = $errorMsg
         }
     }
+    
+    # Check for cancellation after processing each row
+    if ($progressWindow -and $progressWindow.IsCancelled()) {
+        Write-Host "`nImport cancelled by user. Stopping after row $rowId..." -ForegroundColor Yellow
+        break
+    }
 }
 
-# Close progress window and enable close button
+# Check if cancelled and handle accordingly
+$wasCancelled = $false
 if ($progressWindow) {
-    $progressWindow.Close()
+    $wasCancelled = $progressWindow.IsCancelled()
+    if ($wasCancelled) {
+        $progressWindow.SetCancelled()
+    } else {
+        $progressWindow.Close()
+    }
 }
 
 # Summary
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Processing Complete!" -ForegroundColor Green
-Write-Host "Successful: $successCount" -ForegroundColor Green
-Write-Host "Skipped (already imported): $skippedCount" -ForegroundColor $(if ($skippedCount -gt 0) { "Yellow" } else { "Gray" })
-Write-Host "Errors: $errorCount" -ForegroundColor $(if ($errorCount -gt 0) { "Red" } else { "Green" })
-Write-Host "Total processed: $($successCount + $errorCount)" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+if ($wasCancelled) {
+    Write-Host "`n========================================" -ForegroundColor Yellow
+    Write-Host "Import Cancelled!" -ForegroundColor Yellow
+    Write-Host "Processed before cancellation: $processedRows / $totalRows" -ForegroundColor Yellow
+    Write-Host "Successful: $successCount" -ForegroundColor Green
+    Write-Host "Skipped (already imported): $skippedCount" -ForegroundColor $(if ($skippedCount -gt 0) { "Yellow" } else { "Gray" })
+    Write-Host "Errors: $errorCount" -ForegroundColor $(if ($errorCount -gt 0) { "Red" } else { "Green" })
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "`nYou can rerun the script to continue from where it left off." -ForegroundColor Gray
+} else {
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host "Processing Complete!" -ForegroundColor Green
+    Write-Host "Successful: $successCount" -ForegroundColor Green
+    Write-Host "Skipped (already imported): $skippedCount" -ForegroundColor $(if ($skippedCount -gt 0) { "Yellow" } else { "Gray" })
+    Write-Host "Errors: $errorCount" -ForegroundColor $(if ($errorCount -gt 0) { "Red" } else { "Green" })
+    Write-Host "Total processed: $($successCount + $errorCount)" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+}
 
 if ($errors.Count -gt 0) {
     Write-Host "`nErrors:" -ForegroundColor Red
@@ -392,7 +464,9 @@ if ($errors.Count -gt 0) {
 }
 
 Write-Host "`nStatus file: $statusFile" -ForegroundColor Cyan
-Write-Host "You can rerun this script to retry failed rows or continue from where you left off." -ForegroundColor Gray
+if (-not $wasCancelled) {
+    Write-Host "You can rerun this script to retry failed rows or continue from where you left off." -ForegroundColor Gray
+}
 
 # Write end metadata to status file
 Write-EndMetadata -StatusFile $statusFile

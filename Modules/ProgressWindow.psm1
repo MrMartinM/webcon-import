@@ -65,13 +65,13 @@ function Show-ProgressWindow {
     $detailsLabel.Text = "Waiting to start processing..."
     $form.Controls.Add($detailsLabel)
     
-    # Create close button (initially disabled)
+    # Create cancel/close button (enabled from start to allow cancellation)
     $closeButton = New-Object System.Windows.Forms.Button
     $closeButton.Location = New-Object System.Drawing.Point(300, 135)
     $closeButton.Size = New-Object System.Drawing.Size(100, 30)
-    $closeButton.Text = "Close"
-    $closeButton.Enabled = $false
-    $closeButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $closeButton.Text = "Cancel"
+    $closeButton.Enabled = $true
+    $closeButton.DialogResult = [System.Windows.Forms.DialogResult]::None  # Don't auto-close on click
     $form.Controls.Add($closeButton)
     
     # Show the form (non-blocking)
@@ -81,6 +81,7 @@ function Show-ProgressWindow {
     $form.Refresh()
     
     # Return an object with methods to update the progress
+    # Store cancellation flag as a property of the object for proper access
     $script:progressWindowObj = @{
         Form = $form
         ProgressBar = $progressBar
@@ -88,7 +89,29 @@ function Show-ProgressWindow {
         DetailsLabel = $detailsLabel
         CloseButton = $closeButton
         TotalRows = $TotalRows
+        Cancelled = $false  # Cancellation flag stored as property
+        IsComplete = $false  # Flag to track if processing is complete
     }
+    
+    # Create cancel click handler (will be removed when processing completes)
+    $cancelHandler = {
+        # Only cancel if processing is not complete
+        if (-not $script:progressWindowObj.IsComplete) {
+            # Set cancellation flag on the script-scoped object
+            $script:progressWindowObj.Cancelled = $true
+            $this.Text = "Cancelling..."
+            $this.Enabled = $false
+            # Force UI update
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+    
+    # Add click event handler to cancel button
+    # Access the progress window object through script scope (created above)
+    $closeButton.Add_Click($cancelHandler)
+    
+    # Store the handler reference so we can remove it later
+    $script:progressWindowObj.CancelHandler = $cancelHandler
     
     # Add update method
     $script:progressWindowObj | Add-Member -MemberType ScriptMethod -Name UpdateProgress -Value {
@@ -118,10 +141,10 @@ function Show-ProgressWindow {
         # Update details label with formatted counts
         $this.DetailsLabel.Text = "Successful: $SuccessCount | Errors: $ErrorCount | Skipped: $SkippedCount"
         
-        # Refresh the form to update UI
+        # Refresh the form to update UI and process Windows messages (including button clicks)
         try {
             $this.Form.Refresh()
-            [System.Windows.Forms.Application]::DoEvents()
+            [System.Windows.Forms.Application]::DoEvents()  # This allows cancel button click to be processed
         } catch {
             # Silently ignore refresh errors (form might be disposed)
         }
@@ -129,9 +152,57 @@ function Show-ProgressWindow {
     
     # Add close method
     $script:progressWindowObj | Add-Member -MemberType ScriptMethod -Name Close -Value {
+        # Mark processing as complete
+        $this.IsComplete = $true
+        
+        # Remove the cancel handler
+        if ($this.CancelHandler) {
+            $this.CloseButton.Remove_Click($this.CancelHandler)
+        }
+        
+        # Add close handler that actually closes the form
+        # Use FindForm() to get the form from the button (more reliable than closure)
+        $this.CloseButton.Add_Click({
+            $form = $this.FindForm()
+            if ($form) {
+                $form.Close()
+            }
+        })
+        
         $this.CloseButton.Enabled = $true
         $this.CloseButton.Text = "Close"
         $this.StatusLabel.Text = "Processing Complete!"
+        $this.Form.Refresh()
+    }
+    
+    # Add method to check if cancelled (access property directly)
+    $script:progressWindowObj | Add-Member -MemberType ScriptMethod -Name IsCancelled -Value {
+        return $this.Cancelled
+    }
+    
+    # Add method to set cancelled state
+    $script:progressWindowObj | Add-Member -MemberType ScriptMethod -Name SetCancelled -Value {
+        # Mark processing as complete (cancelled)
+        $this.IsComplete = $true
+        $this.Cancelled = $true
+        
+        # Remove the cancel handler
+        if ($this.CancelHandler) {
+            $this.CloseButton.Remove_Click($this.CancelHandler)
+        }
+        
+        # Add close handler that actually closes the form
+        # Use FindForm() to get the form from the button (more reliable than closure)
+        $this.CloseButton.Add_Click({
+            $form = $this.FindForm()
+            if ($form) {
+                $form.Close()
+            }
+        })
+        
+        $this.CloseButton.Text = "Close"
+        $this.CloseButton.Enabled = $true
+        $this.StatusLabel.Text = "Import cancelled by user"
         $this.Form.Refresh()
     }
     
