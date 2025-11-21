@@ -27,14 +27,26 @@ This document contains detailed technical information about the Webcon PowerShel
     "ClientSecret": "",
     "DatabaseId": "9"
   },
+  "Workflow": {
+    "WorkflowGuid": "your-workflow-guid-here",
+    "FormTypeGuid": "your-form-type-guid-here",
+    "Path": "default",
+    "Mode": "standard"
+  },
   "Excel": {
     "FilePath": "C:\\data\\workflows.xlsx",
-    "StartRow": 2
+    "StartRow": 6
   },
   "StatusFile": "",
   "Retry": {
     "MaxRetries": 3,
     "RetryDelayBase": 2
+  },
+  "ItemList": {
+    "Enabled": false,
+    "SheetName": "ItemList",
+    "ItemListGuid": "your-item-list-guid-here",
+    "ItemListName": "your-item-list-name-here"
   }
 }
 ```
@@ -48,11 +60,20 @@ This document contains detailed technical information about the Webcon PowerShel
 **Security Note**: For security, it's recommended to store the `ClientSecret` in an environment variable instead of the config file. See [Environment Variables](#environment-variables) section below.
 
 ### Workflow Settings
-**Note**: Workflow settings are now stored in the Excel file's "Mapping-Workflow" sheet. See [Excel File Format](#excel-file-format) below.
+- `WorkflowGuid`: The GUID of the workflow to start
+- `FormTypeGuid`: The GUID of the form type
+- `Path`: Path parameter (default: "default" if not provided)
+- `Mode`: Mode parameter (default: "standard" if not provided)
 
 ### Excel Settings
 - `FilePath`: Full path to your Excel file
-- `StartRow`: Row number to start reading (default: 2, assumes row 1 is headers)
+- `StartRow`: Row number to start reading data (default: 5, rows 1-4 are metadata)
+
+### ItemList Settings (Optional)
+- `Enabled`: Set to `true` to enable item list import (default: `false`)
+- `SheetName`: Name of the item list sheet (default: "ItemList")
+- `ItemListGuid`: The GUID of the item list (required if Enabled is true)
+- `ItemListName`: The name of the item list (required if Enabled is true)
 
 ### Status Tracking (Optional)
 - `StatusFile`: Path to status CSV file (default: same directory as Excel file with `.status.csv` extension)
@@ -65,99 +86,115 @@ This document contains detailed technical information about the Webcon PowerShel
 
 ## Excel File Format
 
-Your Excel file **must have three sheets** with fixed names:
+Your Excel file **must have one sheet** named "Data" (plus optional "ItemList" sheet if importing item lists).
 
-### Sheet 1: "Mapping-Workflow"
-This sheet defines the workflow configuration.
+### Sheet: "Data"
+This sheet contains both field mappings (rows 1-4) and data rows (row 5+).
 
-**Required columns:**
-- `WorkflowGuid`: The GUID of the workflow to start
-- `FormTypeGuid`: The GUID of the form type
+**Rows 1-4: Field Metadata** (populated from SQL stored procedure results)
+These rows define the field mappings between Excel columns and Webcon form fields.
+
+- **Row 1**: Friendly field names (e.g., "Active", "Company Name", "Email") - *From SQL column headers*
+- **Row 2**: Database/Technical names (e.g., "WFD_AttBool1", "WFD_AttText1", "WFD_AttText2") - *From SQL stored procedure row 1*
+- **Row 3**: Field GUIDs (the GUID of each Webcon form field) - *From SQL stored procedure row 2*
+- **Row 4**: ColumnType (e.g., "Yes / No choice", "Single line of text", "Floating-point number", "Multiple lines of text") - *From SQL stored procedure row 3*
+
+**Row 5+: Data Rows**
+Your actual data starts from row 5. Column names in row 5+ should match the column headers from row 1.
+
+**Structure:**
+- **Row 1**: Friendly names (e.g., "Active", "CompanyName", "Email") - *From SQL column headers*
+- **Row 2**: Database names (e.g., "WFD_AttBool1", "WFD_AttText1", "WFD_AttText2") - *From SQL stored procedure row 1*
+- **Row 3**: GUIDs (e.g., "89e652c8-f338-49f3-bc84-24f622a2eb88", ...) - *From SQL stored procedure row 2*
+- **Row 4**: ColumnType (e.g., "Yes / No choice", "Single line of text", "Floating-point number") - *From SQL stored procedure row 3*
+- **Row 5+**: Data rows
 
 **Optional columns:**
-- `Path`: Path parameter (default: "default" if not provided)
-- `Mode`: Mode parameter (default: "standard" if not provided)
-
-**Structure:**
-- **Row 1**: Headers (WorkflowGuid, FormTypeGuid, Path, Mode)
-- **Row 2**: Configuration data (only first row is used)
-
-**Example Mapping-Workflow sheet:**
-| WorkflowGuid | FormTypeGuid | Path | Mode |
-|--------------|--------------|------|------|
-| f395d755-5a7b-4624-8169-869e5a149b5b | 810ac36c-f605-4762-8ccd-52ec42288c77 | default | standard |
-
-### Sheet 2: "Mapping-Fields"
-This sheet defines the field mappings between Excel columns and Webcon form fields.
-
-**Required columns:**
-- `ExcelColumn`: The column name from the Data sheet
-- `FieldGuid`: The GUID of the Webcon form field
-- `FieldName`: The name of the Webcon form field
-- `FieldType`: The type of the Webcon form field (e.g., "Unspecified")
-
-**Optional columns:**
-- `IsChoice`: Set to "Yes", "True", or "1" for choice/dropdown fields (optional - auto-detected if FieldName contains "Choose" or "Choice")
-
-**Structure:**
-- **Row 1**: Headers (ExcelColumn, FieldGuid, FieldName, FieldType, IsChoice)
-- **Row 2+**: Mapping data
-
-**Example Mapping-Fields sheet:**
-| ExcelColumn | FieldGuid | FieldName | FieldType | IsChoice |
-|-------------|-----------|-----------|-----------|----------|
-| CompanyName | 3712b43b-5947-4c7b-b73a-372ea83daa91 | WFD_AttText1 | Unspecified | |
-| Customer | 331bfbca-0bc2-47f6-8745-02ae38895e8f | WFD_AttChoose2 | Unspecified | Yes |
-
-### Sheet 3: "Data"
-This sheet contains the actual data rows to process.
-
-**Structure:**
-- **Row 1**: Column headers (must match `ExcelColumn` values from the Mapping-Fields sheet)
-- **Row 2+**: Data rows
-- **Optional**: Include an `ID` column to uniquely identify rows. If not present, row numbers are used.
+- `ID`: Column to uniquely identify rows. Used for status tracking and linking item list rows to workflow instances. If not present, row numbers are used.
 
 **Example Data sheet:**
-| ID | CompanyName | Email |
-|----|-------------|-------|
-| 1  | ACME d.o.o. | info@acme.com |
-| 2  | Another Company | contact@another.com |
+| Active | CompanyName | Email |
+|--------|-------------|-------|
+| WFD_AttBool1 | WFD_AttText1 | WFD_AttText2 |
+| 89e652c8-f338-49f3-bc84-24f622a2eb88 | 2c7354b6-7b90-4a32-9471-6f39d68d5458 | 6c610728-24db-4a5d-a704-b33f849a1f05 |
+| Yes / No choice | Single line of text | Single line of text |
+| ID | Active | CompanyName | Email |
+| 1 | Yes | ACME d.o.o. | info@acme.com |
+| 2 | No | Another Company | contact@another.com |
+
+### Optional Sheet: "ItemList"
+If you're importing item lists, create a sheet with the same structure as the Data sheet.
+
+**Rows 1-4: Item List Column Metadata**
+- **Row 1**: Friendly column names (e.g., "Account Number", "Discount Value") - *From SQL column headers*
+- **Row 2**: Database/Technical names (e.g., "DET_Att1", "DET_Value1") - *From SQL stored procedure row 1*
+- **Row 3**: Column GUIDs - *From SQL stored procedure row 2*
+- **Row 4**: ColumnType (e.g., "Single line of text", "Floating-point number") - *From SQL stored procedure row 3*
+
+**Row 5+: Item List Data Rows**
+- Must include an `ID` column that matches the `ID` from the Data sheet to link item list rows to workflow instances.
+
+**Example ItemList sheet:**
+| RowType | Account Number | Discount Value |
+|---------|----------------|----------------|
+| DatabaseName | DET_Att1 | DET_Value1 |
+| Guid | BA0F6ADB-CDF6-4066-A287-B977A354EA1B | B0DF394B-2F36-4A5F-ABE7-BB93A6266F85 |
+| ColumnType | Single line of text | Floating-point number |
+| ID | Account Number | Discount Value |
+| 1 | ACC001 | 10.5 |
+| 1 | ACC002 | 15.0 |
+| 2 | ACC003 | 20.0 |
 
 ## Field Type Detection
 
-The script automatically detects field types based on FieldName patterns:
+The script automatically detects field types using a two-tier approach:
+
+**Primary Method: ColumnType Parsing**
+The script detects field types - Primary: ColumnType parsing, Secondary: DatabaseName patterns:
+- "Yes / No choice" → Boolean field
+- "Floating-point number" → Decimal field
+- "Single line of text" → String field
+- "Multiple lines of text" → String/LongText field
+- Contains "choice" (case-insensitive, excluding "Yes / No choice") → Choice field
+
+**Secondary Method: DatabaseName Pattern Matching**
+If ColumnType doesn't match known patterns, the script falls back to DatabaseName patterns:
 
 ### Choice Fields
-Fields with "Choose" or "Choice" in the name (e.g., `WFD_AttChoose2`)
+**Detection**: ColumnType contains "choice" (excluding "Yes / No choice") OR DatabaseName contains "Choose" or "Choice" (e.g., `WFD_AttChoose2`, `DET_AttChoose1`)
 - **Value format**: 
   - Single value (used as id, name left blank): `0000019`
   - Or: `id#name` format: `0000019#Customer Name`
-- **Can also be marked** with `IsChoice` column set to "Yes"
 - **API format**: Array of objects with `id` and `name` properties
 
 ### Boolean Fields
-Fields with "AttBool" in the name (e.g., `WFD_AttBool1`)
+**Detection**: ColumnType is "Yes / No choice" OR DatabaseName contains "AttBool" (e.g., `WFD_AttBool1`, `DET_AttBool1`)
 - **Value format**: `true`, `false`, `1`, `0`, `yes`, `no`, `y`, `n`
 - **Converted to**: Boolean `true` or `false`
 - **API format**: Boolean value (not string)
 
 ### DateTime Fields
-Fields with "AttDateTime" in the name (e.g., `WFD_AttDateTime2`)
+**Detection**: DatabaseName contains "AttDateTime" (e.g., `WFD_AttDateTime2`, `DET_AttDateTime1`)
 - **Value format**: Any valid DateTime format (Excel date, ISO string, etc.)
 - **Converted to**: ISO 8601 format: `2025-11-05T12:42:24.305Z`
 - **API format**: ISO 8601 string
 
 ### Integer Fields
-Fields with "AttInt" in the name (e.g., `WFD_AttInt1`)
+**Detection**: DatabaseName contains "AttInt" (e.g., `WFD_AttInt1`, `DET_AttInt1`)
 - **Value format**: Integer number
 - **Converted to**: Integer: `0`, `1`, `123`, etc.
 - **API format**: Integer number
 
 ### Decimal Fields
-Fields with "AttDecimal" in the name (e.g., `WFD_AttDecimal7`)
+**Detection**: ColumnType is "Floating-point number" OR DatabaseName contains "AttDecimal" or starts with "DET_Value" (e.g., `WFD_AttDecimal7`, `DET_Value1`)
 - **Value format**: Decimal number
 - **Converted to**: Decimal: `0`, `1.5`, `123.45`, etc.
 - **API format**: Decimal number
+
+### Long Text Fields
+**Detection**: ColumnType is "Multiple lines of text" OR DatabaseName starts with "DET_LongText" (item lists only)
+- **Value format**: Any text (can contain newlines)
+- **API format**: String value
 
 ### Regular Fields
 All other fields are treated as strings
@@ -276,6 +313,22 @@ setx WEBCON_CLIENT_SECRET "your-client-secret-here"
     "ClientId": "your-client-id-here",
     "ClientSecret": "",
     "DatabaseId": "9"
+  },
+  "Workflow": {
+    "WorkflowGuid": "your-workflow-guid-here",
+    "FormTypeGuid": "your-form-type-guid-here",
+    "Path": "default",
+    "Mode": "standard"
+  },
+  "Excel": {
+    "FilePath": "C:\\data\\workflows.xlsx",
+    "StartRow": 6
+  },
+  "ItemList": {
+    "Enabled": false,
+    "SheetName": "ItemList",
+    "ItemListGuid": "your-item-list-guid-here",
+    "ItemListName": "your-item-list-name-here"
   }
 }
 ```
@@ -290,9 +343,10 @@ Leave `ClientSecret` empty in the config file when using environment variables.
 - `Start-WebconWorkflowWithRetry`: Creates a workflow element with automatic retry logic for transient errors
 
 ### ExcelReader.psm1
-- `Read-WorkflowMapping`: Reads the Mapping-Workflow sheet (first sheet) and returns workflow configuration
-- `Read-MappingSheet`: Reads the Mapping-Fields sheet (second sheet) and returns field mappings
-- `Read-ExcelFile`: Reads the Data sheet and returns rows as objects
+- `Read-FieldMappingsFromDataSheet`: Reads field mappings from rows 1-4 of the Data sheet
+- `Read-ExcelFile`: Reads data rows from the Data sheet (starting at row 5)
+- `Read-ItemListMappingsFromDataSheet`: Reads item list column mappings from rows 1-4 of the ItemList sheet
+- `Read-ItemListData`: Reads item list data rows from the ItemList sheet (starting at row 5)
 
 ### StatusTracker.psm1
 - `Get-ImportStatus`: Reads status CSV file and returns hashtable of row IDs and their status
@@ -317,24 +371,27 @@ The script continues processing even if individual rows fail. Errors are:
 ### Adding New Workflows
 
 For different workflows, you can:
-- Update the "Mapping-Workflow" sheet in your Excel file with different workflow and form type GUIDs
-- Update the "Mapping-Fields" sheet with the appropriate field GUIDs
-- Update the Data sheet with the columns matching your Mapping-Fields sheet
-- Or create a new Excel file with all three sheets configured
+- Update the `Workflow` section in `Config.json` with different workflow and form type GUIDs
+- Update rows 1-4 of the Data sheet with the appropriate field GUIDs and metadata (use SQL stored procedures to get mappings)
+- Update the Data sheet columns to match your field mappings
+- Or create a new Excel file with the Data sheet configured
 
 ### Changing Workflow Configuration
 
-Update the "Mapping-Workflow" sheet in your Excel file:
+Update the `Workflow` section in `Config.json`:
 - Change `WorkflowGuid` to target a different workflow
 - Change `FormTypeGuid` to use a different form type
 - Modify `Path` or `Mode` if needed
 
 ### Changing Field Mappings
 
-Simply update the "Mapping-Fields" sheet in your Excel file:
-- Add new rows to map additional Excel columns to Webcon fields
-- Remove rows to exclude fields
-- Update GUIDs to change which Webcon fields receive the data
+Update rows 1-4 of the Data sheet (use SQL stored procedures to get mappings):
+- **Row 1**: Update friendly names (add/remove columns) - *From SQL column headers*
+- **Row 2**: Update database/technical names - *From SQL stored procedure row 1*
+- **Row 3**: Update field GUIDs - *From SQL stored procedure row 2*
+- **Row 4**: Update ColumnType values - *From SQL stored procedure row 3*
+- Add new columns to map additional Excel columns to Webcon fields
+- Remove columns to exclude fields
 
 ## Troubleshooting
 
@@ -363,18 +420,21 @@ Run: `Install-Module ImportExcel -Scope CurrentUser`
 - Use absolute paths if relative paths don't work
 - Ensure the file is not locked by another application
 
-### "Mapping-Workflow sheet is missing required columns"
-- Ensure the Mapping-Workflow sheet (first sheet) has these exact column names: WorkflowGuid, FormTypeGuid
-- Check that Row 1 contains the headers
-- Ensure Row 2 contains the workflow configuration values
+### "Workflow configuration not found in Config.json"
+- Ensure the `Workflow` section exists in `Config.json`
+- Check that `WorkflowGuid` and `FormTypeGuid` are provided
+- Verify the JSON syntax is correct
 
-### "Mapping-Fields sheet is missing required columns"
-- Ensure the Mapping-Fields sheet (second sheet) has these exact column names: ExcelColumn, FieldGuid, FieldName, FieldType
-- Check that Row 1 contains the headers
+### "Data sheet is missing metadata rows"
+- Ensure rows 1-4 exist in the Data sheet
+- Check that row 1 contains friendly field names
+- Verify that row 2 contains database/technical names
+- Verify that row 3 contains field GUIDs
+- Verify that row 4 contains ColumnType values
 
 ### "Data sheet not found"
-- Ensure your Excel file has a sheet named "Data" (third sheet)
-- Check that the sheet name is spelled exactly as "Data"
+- Ensure your Excel file has a sheet named "Data"
+- Check that the sheet name is spelled exactly as "Data" (case-sensitive)
 
 ### Import stops mid-process
 - **Resume**: Simply rerun the script - it will automatically skip successfully imported rows
@@ -407,19 +467,22 @@ Run: `Install-Module ImportExcel -Scope CurrentUser`
 ## How It Works
 
 1. **Load Status**: Loads import status from CSV file (if exists) to track already-imported rows
-2. **Read Workflow Config**: Reads workflow configuration from the "Mapping-Workflow" sheet (first sheet)
-3. **Read Field Mappings**: Reads field mappings from the "Mapping-Fields" sheet (second sheet)
-4. **Authentication**: Authenticates with Webcon using OAuth2 client credentials
-5. **Read Data**: Reads data rows from the "Data" sheet (third sheet)
-6. **Show Progress Window**: Displays a Windows Forms window with real-time progress
-7. **Row Processing**: For each data row:
+2. **Read Workflow Config**: Reads workflow configuration from `Config.json` (Workflow section)
+3. **Read Field Mappings**: Reads field mappings from rows 1-4 of the Data sheet
+4. **Read Item List Mappings** (if enabled): Reads item list column mappings from rows 1-4 of the ItemList sheet
+5. **Authentication**: Authenticates with Webcon using OAuth2 client credentials
+6. **Read Data**: Reads data rows from the Data sheet (starting at row 5)
+7. **Read Item List Data** (if enabled): Reads item list data rows from the ItemList sheet (starting at row 5) and groups by ID
+8. **Show Progress Window**: Displays a Windows Forms window with real-time progress
+9. **Row Processing**: For each data row:
    - Checks if row is already successfully imported (skips if yes)
-   - Maps Excel columns to Webcon form fields using the mappings from the Mapping-Fields sheet
+   - Maps Excel columns to Webcon form fields using the mappings from rows 1-4
+   - Finds matching item list rows (if enabled) using ID
    - Creates one workflow element via Webcon API with automatic retry for transient errors
    - Updates status CSV file with result (Success or Error)
    - Updates progress window with current status
-8. **Summary**: Displays success/error/skipped counts and details
-9. **Wait for User**: Progress window remains open for review until user closes it
+10. **Summary**: Displays success/error/skipped counts and details
+11. **Wait for User**: Progress window remains open for review until user closes it
 
 ## License
 

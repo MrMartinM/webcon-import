@@ -51,16 +51,119 @@ if ($alreadyImportedCount -gt 0) {
 # Write start metadata to status file
 Write-StartMetadata -StatusFile $statusFile
 
-# Step 2: Read workflow configuration from Excel Mapping-Workflow sheet
-Write-Host "`nReading workflow configuration from Excel Mapping-Workflow sheet..." -ForegroundColor Yellow
-$workflowConfig = Read-WorkflowMapping -FilePath $config.Excel.FilePath -StartRow $config.Excel.StartRow
+# Step 2: Read workflow configuration from Config.json
+Write-Host "`nReading workflow configuration from Config.json..." -ForegroundColor Yellow
+if (-not $config.Workflow) {
+    throw "Workflow configuration not found in Config.json. Please add a 'Workflow' section with WorkflowGuid and FormTypeGuid."
+}
+
+$workflowConfig = @{
+    WorkflowGuid = $config.Workflow.WorkflowGuid
+    FormTypeGuid = $config.Workflow.FormTypeGuid
+    Path = if ($config.Workflow.Path) { $config.Workflow.Path } else { "default" }
+    Mode = if ($config.Workflow.Mode) { $config.Workflow.Mode } else { "standard" }
+}
+
 Write-Host "Workflow Guid: $($workflowConfig.WorkflowGuid)" -ForegroundColor Green
 Write-Host "Form Type Guid: $($workflowConfig.FormTypeGuid)" -ForegroundColor Green
 
-# Step 3: Read field mappings from Excel Mapping-Fields sheet
-Write-Host "`nReading field mappings from Excel Mapping-Fields sheet..." -ForegroundColor Yellow
-$mappings = Read-MappingSheet -FilePath $config.Excel.FilePath -StartRow $config.Excel.StartRow
+# Step 3: Read field mappings from Data sheet (rows 1-4)
+Write-Host "`nReading field mappings from Data sheet (rows 1-4)..." -ForegroundColor Yellow
+$mappingResult = Read-FieldMappingsFromDataSheet -FilePath $config.Excel.FilePath -WorksheetName "Data"
+$mappings = $mappingResult.Mappings
+$dataIdColumnName = $mappingResult.IdColumnName
 Write-Host "Found $($mappings.Count) field mappings" -ForegroundColor Green
+Write-Host "Detected ID column name: '$dataIdColumnName'" -ForegroundColor Gray
+
+# Step 3.5: Read item list configuration and data (if enabled)
+$itemListEnabled = $false
+$itemListMappings = @()
+$itemListData = @()
+$itemListGroupedById = @{}
+$itemListGuid = $null
+$itemListName = $null
+
+# Check ItemList configuration
+if ($config.ItemList) {
+    Write-Host "`nItemList configuration found:" -ForegroundColor Cyan
+    Write-Host "  Enabled: $($config.ItemList.Enabled)" -ForegroundColor Gray
+    Write-Host "  SheetName: $(if ($config.ItemList.SheetName) { $config.ItemList.SheetName } else { 'ItemList (default)' })" -ForegroundColor Gray
+    
+    if ($config.ItemList.Enabled -eq $true) {
+        $itemListEnabled = $true
+        Write-Host "Item list import is enabled" -ForegroundColor Cyan
+        
+        # Get item list GUID and name from Config.json
+        if (-not $config.ItemList.ItemListGuid -or -not $config.ItemList.ItemListName) {
+            throw "ItemList.ItemListGuid and ItemList.ItemListName must be specified in Config.json when ItemList.Enabled is true"
+        }
+        $itemListGuid = $config.ItemList.ItemListGuid
+        $itemListName = $config.ItemList.ItemListName
+        Write-Host "  ItemListGuid: $itemListGuid" -ForegroundColor Gray
+        Write-Host "  ItemListName: $itemListName" -ForegroundColor Gray
+        
+        # Read item list mappings from ItemList sheet (rows 1-4)
+        $itemListSheetName = if ($config.ItemList.SheetName) { $config.ItemList.SheetName } else { "ItemList" }
+        Write-Host "Reading item list mappings from Excel $itemListSheetName sheet (rows 1-4)..." -ForegroundColor Yellow
+        try {
+            $itemListMappingResult = Read-ItemListMappingsFromDataSheet -FilePath $config.Excel.FilePath -WorksheetName $itemListSheetName
+            $itemListMappings = $itemListMappingResult.Mappings
+            $itemListIdColumnName = $itemListMappingResult.IdColumnName
+            Write-Host "Found $($itemListMappings.Count) item list column mappings" -ForegroundColor Green
+            Write-Host "Detected ItemList ID column name: '$itemListIdColumnName'" -ForegroundColor Gray
+            
+            # Read item list data (starting from row 5)
+            $startRow = if ($config.Excel.StartRow -and $config.Excel.StartRow -ge 5) { $config.Excel.StartRow } else { 5 }
+            Write-Host "Reading item list data from Excel $itemListSheetName sheet (starting at row $startRow)..." -ForegroundColor Yellow
+            $itemListData = Read-ItemListData -FilePath $config.Excel.FilePath -WorksheetName $itemListSheetName -StartRow $startRow -IdColumnName $itemListIdColumnName
+            Write-Host "Found $($itemListData.Count) item list rows" -ForegroundColor Green
+            
+            # Group item list rows by ID using detected column name
+            foreach ($itemListRow in $itemListData) {
+                # Use bracket notation to access column with space or empty name
+                $idValue = if ($itemListRow.PSObject.Properties.Name -contains $itemListIdColumnName) {
+                    $itemListRow.$itemListIdColumnName
+                } else {
+                    # Try bracket notation as fallback
+                    $itemListRow[$itemListIdColumnName]
+                }
+                
+                $itemListRowId = if ($null -ne $idValue -and $idValue.ToString().Trim() -ne "") {
+                    $idValue.ToString().Trim()
+                } else {
+                    ""
+                }
+                
+                if ($itemListRowId -ne "") {
+                    if (-not $itemListGroupedById.ContainsKey($itemListRowId)) {
+                        $itemListGroupedById[$itemListRowId] = @()
+                    }
+                    $itemListGroupedById[$itemListRowId] += $itemListRow
+                } else {
+                    Write-Warning "Item list row has empty or missing ID (column '$itemListIdColumnName'), skipping: $($itemListRow | ConvertTo-Json -Compress)"
+                }
+            }
+            Write-Host "Grouped item list rows into $($itemListGroupedById.Keys.Count) ID groups" -ForegroundColor Green
+            
+            # Debug: Show which IDs have item lists
+            if ($itemListGroupedById.Keys.Count -gt 0) {
+                Write-Host "Item list IDs found: $($itemListGroupedById.Keys -join ', ')" -ForegroundColor Gray
+            } else {
+                Write-Warning "No item list rows were grouped. Check that item list rows have valid ID values matching Data sheet IDs."
+            }
+        }
+        catch {
+            Write-Error "Failed to read item list configuration: $($_.Exception.Message)"
+            Write-Error "Exception details: $($_.Exception | Format-List -Force | Out-String)"
+            Write-Warning "Continuing without item lists."
+            $itemListEnabled = $false
+        }
+    } else {
+        Write-Host "Item list import is disabled" -ForegroundColor Gray
+    }
+} else {
+    Write-Host "`nNo ItemList configuration found in Config.json" -ForegroundColor Gray
+}
 
 # Step 4: Get client secret from environment variable or config
 $clientSecret = if ($config.Webcon.ClientSecret -and $config.Webcon.ClientSecret.Trim() -ne "") {
@@ -98,8 +201,21 @@ Write-Host "Authentication successful!" -ForegroundColor Green
 
 # Step 6: Read data from Excel Data sheet
 Write-Host "`nReading data from Excel Data sheet..." -ForegroundColor Yellow
-$rows = Read-ExcelFile -FilePath $config.Excel.FilePath -WorksheetName "Data" -StartRow $config.Excel.StartRow
+$startRow = if ($config.Excel.StartRow -and $config.Excel.StartRow -ge 5) { $config.Excel.StartRow } else { 5 }
+Write-Host "Using StartRow: $startRow (will skip rows 2-4 as metadata)" -ForegroundColor Gray
+$rows = Read-ExcelFile -FilePath $config.Excel.FilePath -WorksheetName "Data" -StartRow $startRow -IdColumnName $dataIdColumnName
 Write-Host "Found $($rows.Count) rows to process" -ForegroundColor Green
+
+# Debug: Show first few rows to verify they're not metadata
+if ($rows.Count -gt 0) {
+    Write-Host "`nFirst row preview (should be data, not metadata):" -ForegroundColor Gray
+    $firstRow = $rows | Select-Object -First 1
+    $firstRowProps = $firstRow.PSObject.Properties.Name | Select-Object -First 5
+    foreach ($prop in $firstRowProps) {
+        $propValue = if ($firstRow.PSObject.Properties.Name -contains $prop) { $firstRow.$prop } else { $firstRow[$prop] }
+        Write-Host "  $prop = $propValue" -ForegroundColor Gray
+    }
+}
 
 # Step 7: Process each row
 $successCount = 0
@@ -122,9 +238,18 @@ foreach ($row in $rows) {
     $rowIndex++
     
     # Generate row ID - check for ID column first, otherwise use row index
-    $rowId = if ($row.PSObject.Properties.Name -contains "ID" -and $null -ne $row.ID) {
-        $row.ID.ToString()
+    # Use detected ID column name (may be space or empty string)
+    $idValue = if ($row.PSObject.Properties.Name -contains $dataIdColumnName) {
+        $row.$dataIdColumnName
     } else {
+        # Try bracket notation as fallback
+        $row[$dataIdColumnName]
+    }
+    
+    $rowId = if ($null -ne $idValue -and $idValue.ToString().Trim() -ne "") {
+        $idValue.ToString().Trim()
+    } else {
+        # Fallback to row number if ID column doesn't exist or is empty
         $rowIndex.ToString()
     }
     
@@ -183,50 +308,49 @@ foreach ($row in $rows) {
             $excelValue = $row.($fieldMapping.ExcelColumn)
             
             if ($null -ne $excelValue) {
-                # Detect field type based on field name pattern
+                # Detect field type - Primary: ColumnType parsing, Secondary: DatabaseName patterns
                 $isChoiceField = $false
                 $isBooleanField = $false
                 $isDateTimeField = $false
                 $isIntegerField = $false
                 $isDecimalField = $false
                 
-                # Check if field name indicates a choice field (e.g., WFD_AttChoose2)
-                if ($fieldMapping.FieldName -match "Choose" -or $fieldMapping.FieldName -match "Choice") {
-                    $isChoiceField = $true
-                    Write-Host "  Detected choice field: $($fieldMapping.FieldName)" -ForegroundColor Gray
-                }
+                $columnType = if ($fieldMapping.ColumnType) { $fieldMapping.ColumnType.ToString().ToLower() } else { "" }
+                $databaseName = if ($fieldMapping.DatabaseName) { $fieldMapping.DatabaseName.ToString() } else { "" }
                 
-                # Check if field name indicates a boolean field (e.g., WFD_AttBool1)
-                if ($fieldMapping.FieldName -match "AttBool") {
+                # Primary: Parse ColumnType strings
+                if ($columnType -match "yes\s*/\s*no\s*choice") {
                     $isBooleanField = $true
-                    Write-Host "  Detected boolean field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                    Write-Host "  Detected boolean field (ColumnType: '$($fieldMapping.ColumnType)'): $databaseName" -ForegroundColor Gray
                 }
-                
-                # Check if field name indicates a datetime field (e.g., WFD_AttDateTime2)
-                if ($fieldMapping.FieldName -match "AttDateTime") {
-                    $isDateTimeField = $true
-                    Write-Host "  Detected datetime field: $($fieldMapping.FieldName)" -ForegroundColor Gray
-                }
-                
-                # Check if field name indicates an integer field (e.g., WFD_AttInt1)
-                if ($fieldMapping.FieldName -match "AttInt") {
-                    $isIntegerField = $true
-                    Write-Host "  Detected integer field: $($fieldMapping.FieldName)" -ForegroundColor Gray
-                }
-                
-                # Check if field name indicates a decimal field (e.g., WFD_AttDecimal7)
-                if ($fieldMapping.FieldName -match "AttDecimal") {
+                elseif ($columnType -match "floating-point\s*number") {
                     $isDecimalField = $true
-                    Write-Host "  Detected decimal field: $($fieldMapping.FieldName)" -ForegroundColor Gray
+                    Write-Host "  Detected decimal field (ColumnType: '$($fieldMapping.ColumnType)'): $databaseName" -ForegroundColor Gray
                 }
-                
-                # Check for optional IsChoice column in mapping
-                if ($fieldMapping.PSObject.Properties.Name -contains "IsChoice") {
-                    $isChoiceColumn = $fieldMapping.IsChoice
-                    if ($isChoiceColumn -eq "Yes" -or $isChoiceColumn -eq "True" -or $isChoiceColumn -eq $true -or $isChoiceColumn -eq 1) {
-                        $isChoiceField = $true
-                        Write-Host "  Explicitly marked as choice field: $($fieldMapping.FieldName)" -ForegroundColor Gray
-                    }
+                elseif ($columnType -match "choice" -and -not $columnType -match "yes\s*/\s*no") {
+                    $isChoiceField = $true
+                    Write-Host "  Detected choice field (ColumnType: '$($fieldMapping.ColumnType)'): $databaseName" -ForegroundColor Gray
+                }
+                # Secondary: Use DatabaseName patterns as fallback
+                elseif ($databaseName -match "AttChoose" -or $databaseName -match "Choose") {
+                    $isChoiceField = $true
+                    Write-Host "  Detected choice field (DatabaseName pattern): $databaseName" -ForegroundColor Gray
+                }
+                elseif ($databaseName -match "AttBool") {
+                    $isBooleanField = $true
+                    Write-Host "  Detected boolean field (DatabaseName pattern): $databaseName" -ForegroundColor Gray
+                }
+                elseif ($databaseName -match "AttDateTime") {
+                    $isDateTimeField = $true
+                    Write-Host "  Detected datetime field (DatabaseName pattern): $databaseName" -ForegroundColor Gray
+                }
+                elseif ($databaseName -match "AttInt") {
+                    $isIntegerField = $true
+                    Write-Host "  Detected integer field (DatabaseName pattern): $databaseName" -ForegroundColor Gray
+                }
+                elseif ($databaseName -match "AttDecimal") {
+                    $isDecimalField = $true
+                    Write-Host "  Detected decimal field (DatabaseName pattern): $databaseName" -ForegroundColor Gray
                 }
                 
                 # Build base form field structure with specific order: guid, type, svalue, name, formLayout, value
@@ -341,15 +465,16 @@ foreach ($row in $rows) {
                     # Regular field - value is a string
                     $fieldValue = $excelValueStr
                     $svalueStr = $excelValueStr
-                    Write-Host "  Regular field '$($fieldMapping.FieldName)': '$excelValueStr'" -ForegroundColor Gray
+                    $fieldNameDisplay = if ($fieldMapping.DatabaseName) { $fieldMapping.DatabaseName } else { $fieldMapping.FieldName }
+                    Write-Host "  Regular field '$fieldNameDisplay': '$excelValueStr'" -ForegroundColor Gray
                 }
                 
                 # Build form field with ordered properties
                 $formField = [ordered]@{
                     guid     = $fieldMapping.FieldGuid
-                    type     = $fieldMapping.FieldType
+                    type     = if ($fieldMapping.FieldType) { $fieldMapping.FieldType } else { "Unspecified" }
                     svalue   = $svalueStr
-                    name     = $fieldMapping.FieldName
+                    name     = if ($fieldMapping.DatabaseName) { $fieldMapping.DatabaseName } else { $fieldMapping.FieldName }
                     formLayout = @{
                         editability  = "Editable"
                         requiredness = "Optional"
@@ -368,6 +493,215 @@ foreach ($row in $rows) {
             break
         }
         
+        # Build item lists if enabled
+        $itemLists = @()
+        if ($itemListEnabled -and $itemListMappings.Count -gt 0) {
+            # Use ID from current workflow row to find matching item list rows
+            # Find matching item list rows
+            if ($itemListGroupedById.ContainsKey($rowId)) {
+                $matchingItemListRows = $itemListGroupedById[$rowId]
+                Write-Host "  Found $($matchingItemListRows.Count) item list rows for ID $rowId" -ForegroundColor Gray
+                
+                # Build rows array
+                $itemListRows = @()
+                foreach ($itemListRow in $matchingItemListRows) {
+                    $cells = @()
+                    
+                    foreach ($columnMapping in $itemListMappings) {
+                        $excelValue = $itemListRow.($columnMapping.ExcelColumn)
+                        
+                        if ($null -ne $excelValue) {
+                            # Detect field type - Primary: ColumnType parsing, Secondary: DatabaseName patterns (DET_ prefix)
+                            $isChoiceField = $false
+                            $isBooleanField = $false
+                            $isDateTimeField = $false
+                            $isIntegerField = $false
+                            $isDecimalField = $false
+                            $isLongTextField = $false
+                            
+                            $columnType = if ($columnMapping.ColumnType) { $columnMapping.ColumnType.ToString().ToLower() } else { "" }
+                            $columnName = if ($columnMapping.DatabaseName) { $columnMapping.DatabaseName.ToString() } else { $columnMapping.ColumnName }
+                            
+                            # Primary: Parse ColumnType strings
+                            if ($columnType -match "yes\s*/\s*no\s*choice") {
+                                $isBooleanField = $true
+                                Write-Host "    Detected boolean field (ColumnType: '$($columnMapping.ColumnType)'): $columnName" -ForegroundColor Gray
+                            }
+                            elseif ($columnType -match "floating-point\s*number") {
+                                $isDecimalField = $true
+                                Write-Host "    Detected decimal field (ColumnType: '$($columnMapping.ColumnType)'): $columnName" -ForegroundColor Gray
+                            }
+                            elseif ($columnType -match "multiple\s*lines\s*of\s*text") {
+                                $isLongTextField = $true
+                                Write-Host "    Detected long text field (ColumnType: '$($columnMapping.ColumnType)'): $columnName" -ForegroundColor Gray
+                            }
+                            elseif ($columnType -match "choice" -and -not $columnType -match "yes\s*/\s*no") {
+                                $isChoiceField = $true
+                                Write-Host "    Detected choice field (ColumnType: '$($columnMapping.ColumnType)'): $columnName" -ForegroundColor Gray
+                            }
+                            # Secondary: Use DatabaseName patterns as fallback
+                            elseif ($columnName -match "^DET_Value") {
+                                $isDecimalField = $true
+                                Write-Host "    Detected decimal field (DatabaseName pattern): $columnName" -ForegroundColor Gray
+                            }
+                            elseif ($columnName -match "^DET_LongText") {
+                                $isLongTextField = $true
+                                Write-Host "    Detected long text field (DatabaseName pattern): $columnName" -ForegroundColor Gray
+                            }
+                            elseif ($columnName -match "^DET_Att") {
+                                # Check if field name indicates a choice field
+                                if ($columnName -match "Choose" -or $columnName -match "Choice") {
+                                    $isChoiceField = $true
+                                    Write-Host "    Detected choice field (DatabaseName pattern): $columnName" -ForegroundColor Gray
+                                }
+                                # Check if field name indicates a boolean field
+                                elseif ($columnName -match "AttBool") {
+                                    $isBooleanField = $true
+                                    Write-Host "    Detected boolean field (DatabaseName pattern): $columnName" -ForegroundColor Gray
+                                }
+                                # Check if field name indicates a datetime field
+                                elseif ($columnName -match "AttDateTime") {
+                                    $isDateTimeField = $true
+                                    Write-Host "    Detected datetime field (DatabaseName pattern): $columnName" -ForegroundColor Gray
+                                }
+                                # Check if field name indicates an integer field
+                                elseif ($columnName -match "AttInt") {
+                                    $isIntegerField = $true
+                                    Write-Host "    Detected integer field (DatabaseName pattern): $columnName" -ForegroundColor Gray
+                                }
+                                # Default to string for other DET_Att* fields
+                            }
+                            
+                            # Convert to string and ensure proper UTF-8 encoding
+                            $excelValueStr = if ($null -ne $excelValue) { 
+                                $excelValue.ToString() 
+                            } else { 
+                                "" 
+                            }
+                            
+                            # Normalize string: clean and ensure valid encoding
+                            if ($excelValueStr.Length -gt 0) {
+                                $excelValueStr = $excelValueStr -replace "`0", ""
+                                $excelValueStr = $excelValueStr -replace "[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", ""
+                            }
+                            
+                            # Determine the value field based on field type
+                            $cellValue = $null
+                            $svalueStr = $null
+                            
+                            if ($isChoiceField) {
+                                # Handle choice fields - value must be an array
+                                if ($excelValueStr -match "^\s*([^#]+)\s*#\s*(.+)\s*$") {
+                                    $choiceId = $matches[1].Trim()
+                                    $choiceName = $matches[2].Trim()
+                                } else {
+                                    $choiceId = $excelValueStr.Trim()
+                                    $choiceName = ""
+                                }
+                                
+                                $cellValue = @(
+                                    @{
+                                        id = $choiceId
+                                        name = $choiceName
+                                    }
+                                )
+                                $svalueStr = $excelValueStr
+                            }
+                            elseif ($isBooleanField) {
+                                # Handle boolean fields
+                                if ($excelValue -is [bool]) {
+                                    $cellValue = $excelValue
+                                } elseif ($excelValueStr -match "^(true|1|yes|y)$" -or $excelValueStr -eq "1") {
+                                    $cellValue = $true
+                                } elseif ($excelValueStr -match "^(false|0|no|n)$" -or $excelValueStr -eq "0") {
+                                    $cellValue = $false
+                                } else {
+                                    try {
+                                        $cellValue = [System.Convert]::ToBoolean($excelValue)
+                                    } catch {
+                                        $cellValue = $false
+                                    }
+                                }
+                                $svalueStr = ""
+                            }
+                            elseif ($isDateTimeField) {
+                                # Handle datetime fields
+                                try {
+                                    if ($excelValue -is [DateTime]) {
+                                        $cellValue = $excelValue.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                                    } else {
+                                        $dateTime = [DateTime]::Parse($excelValueStr)
+                                        $cellValue = $dateTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                                    }
+                                    $svalueStr = $cellValue
+                                } catch {
+                                    Write-Host "    Warning: Could not parse datetime value '$excelValueStr', using as string" -ForegroundColor Yellow
+                                    $cellValue = $excelValueStr
+                                    $svalueStr = $excelValueStr
+                                }
+                            }
+                            elseif ($isIntegerField) {
+                                # Handle integer fields
+                                try {
+                                    $cellValue = [int]$excelValue
+                                    $svalueStr = $cellValue.ToString()
+                                } catch {
+                                    Write-Host "    Warning: Could not parse integer value '$excelValueStr', using 0" -ForegroundColor Yellow
+                                    $cellValue = 0
+                                    $svalueStr = "0"
+                                }
+                            }
+                            elseif ($isDecimalField) {
+                                # Handle decimal fields (DET_Value*)
+                                try {
+                                    $cellValue = [decimal]$excelValue
+                                    $svalueStr = $cellValue.ToString()
+                                } catch {
+                                    Write-Host "    Warning: Could not parse decimal value '$excelValueStr', using 0" -ForegroundColor Yellow
+                                    $cellValue = [decimal]0
+                                    $svalueStr = "0"
+                                }
+                            }
+                            else {
+                                # Regular field or long text field - value is a string
+                                $cellValue = $excelValueStr
+                                $svalueStr = $excelValueStr
+                            }
+                            
+                            # Build cell object (bare minimum: guid, svalue, value)
+                            $cell = [ordered]@{
+                                guid = $columnMapping.ColumnGuid
+                                svalue = $svalueStr
+                                value = $cellValue
+                            }
+                            
+                            $cells += $cell
+                        }
+                    }
+                    
+                    # Build row object (only cells array)
+                    $itemListRowObj = [ordered]@{
+                        cells = $cells
+                    }
+                    
+                    $itemListRows += $itemListRowObj
+                }
+                
+                # Build item list object (bare minimum: guid, name, mode, rows)
+                $itemList = [ordered]@{
+                    guid = $itemListGuid
+                    name = $itemListName
+                    mode = "Incremental"
+                    rows = $itemListRows
+                }
+                
+                $itemLists = @($itemList)
+                Write-Host "  Built item list with $($itemListRows.Count) rows" -ForegroundColor Gray
+            } else {
+                Write-Host "  No item list rows found for ID $rowId" -ForegroundColor Gray
+            }
+        }
+        
         # Start workflow with retry logic (one API call per row)
         $result = Start-WebconWorkflowWithRetry -BaseUrl $config.Webcon.BaseUrl `
                                                   -AccessToken $accessToken `
@@ -375,6 +709,7 @@ foreach ($row in $rows) {
                                                   -WorkflowGuid $workflowConfig.WorkflowGuid `
                                                   -FormTypeGuid $workflowConfig.FormTypeGuid `
                                                   -FormFields $formFields `
+                                                  -ItemLists $itemLists `
                                                   -Path $workflowConfig.Path `
                                                   -Mode $workflowConfig.Mode `
                                                   -MaxRetries $maxRetries `

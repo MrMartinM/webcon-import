@@ -5,14 +5,26 @@
     "ClientSecret": "",
     "DatabaseId": "9"
   },
+  "Workflow": {
+    "WorkflowGuid": "your-workflow-guid-here",
+    "FormTypeGuid": "your-form-type-guid-here",
+    "Path": "default",
+    "Mode": "standard"
+  },
   "Excel": {
     "FilePath": "C:\\data\\workflows.xlsx",
-    "StartRow": 2
+    "StartRow": 5
   },
   "StatusFile": "",
   "Retry": {
     "MaxRetries": 3,
     "RetryDelayBase": 2
+  },
+  "ItemList": {
+    "Enabled": false,
+    "SheetName": "ItemList",
+    "ItemListGuid": "your-item-list-guid-here",
+    "ItemListName": "your-item-list-name-here"
   }
 }
 

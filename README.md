@@ -24,9 +24,21 @@ Edit `Config.json`:
     "ClientSecret": "",
     "DatabaseId": "9"
   },
+  "Workflow": {
+    "WorkflowGuid": "your-workflow-guid-here",
+    "FormTypeGuid": "your-form-type-guid-here",
+    "Path": "default",
+    "Mode": "standard"
+  },
   "Excel": {
     "FilePath": "C:\\data\\workflows.xlsx",
-    "StartRow": 2
+    "StartRow": 5
+  },
+  "ItemList": {
+    "Enabled": false,
+    "SheetName": "ItemList",
+    "ItemListGuid": "your-item-list-guid-here",
+    "ItemListName": "your-item-list-name-here"
   }
 }
 ```
@@ -38,26 +50,73 @@ Edit `Config.json`:
 
 **Important**: Make sure the system user (OAuth2 client) used by the script to call the API has **start workflow privileges** in Webcon.
 
-### 4. Prepare Excel File
+### 4. Get Field Mappings from Webcon Database
 
-Your Excel file needs **3 sheets**:
+Before preparing your Excel file, you need to get the field mapping information from your Webcon database using the provided stored procedures.
 
-**Sheet 1: "Mapping-Workflow"** - Workflow configuration
-| WorkflowGuid | FormTypeGuid | Path | Mode |
-|--------------|--------------|------|------|
-| your-guid-here | your-guid-here | default | standard |
+#### For Data Sheet (Workflow Fields)
 
-**Sheet 2: "Mapping-Fields"** - Field mappings
-| ExcelColumn | FieldGuid | FieldName | FieldType |
-|-------------|-----------|-----------|-----------|
-| CompanyName | guid-here | WFD_AttText1 | Unspecified |
+1. **Create the stored procedure** in your Webcon database:
+   ```sql
+   -- Run the script: SQL/mme_GetFieldDefinitions.sql
+   ```
 
-**Sheet 3: "Data"** - Your data rows
-| ID | CompanyName | Email |
-|----|-------------|-------|
-| 1  | ACME Inc.   | info@acme.com |
+2. **Execute the stored procedure** with your workflow GUID:
+   ```sql
+   EXEC dbo.mme_GetFieldDefinitions @WF_Guid = 'your-workflow-guid-here'
+   ```
 
-### 5. Run
+3. **Copy the results** - The procedure returns:
+   - Column headers: Friendly field names (from SQL column headers)
+   - Row 1: DatabaseName (technical field names)
+   - Row 2: Guid (field GUIDs)
+   - Row 3: ColumnType (field type descriptions)
+
+4. **Paste into Excel** - Copy these rows into your Excel "Data" sheet:
+   - Row 1: Column headers (Friendly names from SQL column headers)
+   - Row 2: DatabaseName values (from SQL row 1)
+   - Row 3: Guid values (from SQL row 2)
+   - Row 4: ColumnType values (from SQL row 3)
+
+#### For ItemList Sheet (Item List Fields)
+
+1. **Create the stored procedure** in your Webcon database:
+   ```sql
+   -- Run the script: SQL/mme_GetFieldDetailDefinitions.sql
+   ```
+
+2. **Execute the stored procedure** with your item list configuration GUID:
+   ```sql
+   EXEC dbo.mme_GetFieldDetailDefinitions @WFCON_Guid = 'your-item-list-config-guid-here'
+   ```
+
+3. **Copy the results** - Same structure as above:
+   - Row 1: Column headers (Friendly names from SQL column headers)
+   - Row 2: DatabaseName values (from SQL row 1)
+   - Row 3: Guid values (from SQL row 2)
+   - Row 4: ColumnType values (from SQL row 3)
+
+### 5. Prepare Excel File
+
+Your Excel file needs **1 sheet** (plus optional ItemList sheet):
+
+**Sheet: "Data"** - Field mappings and data in one sheet
+
+**Rows 1-4** contain field metadata (populated from stored procedure results):
+- **Row 1**: Friendly field names (e.g., "Active", "Company Name", "Email") - *From SQL column headers*
+- **Row 2**: Database/Technical names (e.g., "WFD_AttBool1", "WFD_AttText1", "WFD_AttText2") - *From stored procedure row 1*
+- **Row 3**: Field GUIDs - *From stored procedure row 2*
+- **Row 4**: ColumnType (e.g., "Yes / No choice", "Single line of text", "Floating-point number") - *From stored procedure row 3*
+
+**Row 5+**: Your actual data rows
+| ID | Active | CompanyName | Email |
+|----|--------|-------------|-------|
+| 1  | Yes    | ACME Inc.   | info@acme.com |
+| 2  | No     | Another Co. | contact@another.com |
+
+**Optional: "ItemList" sheet** - If you're importing item lists, use the same structure (rows 1-4 = metadata, row 5+ = data). Get the mapping using `mme_GetFieldDetailDefinitions` stored procedure (see step 4 above). Make sure to include an `ID` column that matches the `ID` from the Data sheet to link item list rows to workflow instances.
+
+### 6. Run
 ```powershell
 .\Start-WebconWorkflows.ps1
 ```
@@ -78,8 +137,8 @@ A progress window will show real-time status. The script automatically:
 - Ensure file is not locked by Excel
 
 **"Failed to start workflow"**
-- Verify workflow and form type GUIDs in Mapping-Workflow sheet
-- Check that all required fields are mapped
+- Verify workflow and form type GUIDs in Config.json (Workflow section)
+- Check that all required fields are mapped in rows 1-4 of the Data sheet
 
 **Import stopped mid-process?**
 - Just rerun the script - it automatically resumes from where it left off

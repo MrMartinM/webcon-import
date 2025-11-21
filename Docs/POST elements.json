@@ -1,0 +1,314 @@
+{
+    "workflow": {
+      "id": 0,
+      "guid": "string"
+    },
+    "formType": {
+      "id": 0,
+      "guid": "string"
+    },
+    "parentInstanceId": 0,
+    "formFields": [
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": "string"
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": true
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": {
+          "newComment": "string",
+          "existingEntries": [
+            {
+              "author": "string",
+              "comment": "string",
+              "date": "2025-11-19T20:33:58.142Z",
+              "bpsId": "string"
+            }
+          ]
+        }
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": {
+          "longitude": 0,
+          "latitude": 0
+        }
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": "2025-11-19T20:33:58.142Z"
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": 0
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": 0
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": {
+          "url": "string",
+          "name": "string"
+        }
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": [
+          {
+            "id": "string",
+            "name": "string"
+          }
+        ],
+        "mode": "Standard"
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": "string"
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": 0
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": [
+          {
+            "id": "string",
+            "name": "string"
+          }
+        ]
+      },
+      {
+        "id": 0,
+        "guid": "string",
+        "type": "Unspecified",
+        "svalue": "string",
+        "name": "string",
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        },
+        "value": "string"
+      }
+    ],
+    "itemLists": [
+      {
+        "id": 0,
+        "guid": "string",
+        "name": "string",
+        "mode": "Incremental",
+        "columns": [
+          {
+            "id": 0,
+            "guid": "string",
+            "type": "Unspecified",
+            "name": "string",
+            "formLayout": {
+              "editability": "Editable",
+              "requiredness": "Mandatory"
+            }
+          }
+        ],
+        "rows": [
+          {
+            "id": 0,
+            "delete": true,
+            "cells": [
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": [
+                  {
+                    "id": 0,
+                    "correlatedNewAttachmentGuid": "string",
+                    "name": "string"
+                  }
+                ]
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": true
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": "string"
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": "2025-11-19T20:33:58.142Z"
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": 0
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": {
+                  "url": "string",
+                  "name": "string"
+                }
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": [
+                  {
+                    "id": "string",
+                    "name": "string"
+                  }
+                ],
+                "mode": "Standard"
+              },
+              {
+                "id": 0,
+                "guid": "string",
+                "svalue": "string",
+                "value": "string"
+              }
+            ]
+          }
+        ],
+        "formLayout": {
+          "editability": "Editable",
+          "requiredness": "Mandatory"
+        }
+      }
+    ],
+    "comments": {
+      "newComment": "string"
+    },
+    "attachments": [
+      {
+        "name": "string",
+        "description": "string",
+        "group": "string",
+        "content": "string",
+        "id": 0,
+        "delete": true,
+        "correlatedNewAttachmentGuid": "string"
+      }
+    ],
+    "businessEntity": {
+      "id": 0,
+      "guid": "string"
+    },
+    "specifiedUsersTasks": {
+      "directTasks": [
+        "string"
+      ]
+    }
+  }
