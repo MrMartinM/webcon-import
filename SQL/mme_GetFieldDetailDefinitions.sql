@@ -16,7 +16,7 @@ BEGIN
     SELECT
         DCN_Prompt     AS ColumnName,
         FDD_Name       AS DatabaseName,
-        FDD_Guid       AS Guid,
+        DCN_Guid       AS Guid,
         ObjectName     AS DataType,
         EnglishName    AS ColumnType
     INTO #src
