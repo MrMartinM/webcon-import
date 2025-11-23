@@ -1,0 +1,13 @@
+{
+  "Webcon": {
+    "BaseUrl": "https://your-webcon-instance.com",
+    "ClientId": "your-client-id-here",
+    "ClientSecret": "",
+    "DatabaseId": "9"
+  },
+  "Retry": {
+    "MaxRetries": 3,
+    "RetryDelayBase": 2
+  }
+}
+
