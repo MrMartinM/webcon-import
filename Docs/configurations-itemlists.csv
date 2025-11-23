@@ -1,5 +1,0 @@
-﻿RowType,Account Number,Discount Value,Surcharge (B),Surcharge (C)
-DatabaseName,DET_Att1,DET_Value1,DET_Value2,DET_Value3
-Guid,BA0F6ADB-CDF6-4066-A287-B977A354EA1B,B0DF394B-2F36-4A5F-ABE7-BB93A6266F85,64B2520E-A3DA-48F5-85F0-795302297891,65C7B0E9-EB1F-460C-8E8B-0DA446171577
-DataType,Varchar,Decimal,Decimal,Decimal
-ColumnType,Single line of text,Floating-point number,Floating-point number,Floating-point number

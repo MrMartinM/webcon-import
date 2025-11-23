@@ -1,3 +1,7 @@
+# Data and Docs folders
+Data/
+Docs/
+
 # Sensitive configuration files
 Config.json
 
