@@ -113,7 +113,7 @@ function Add-WebconAttachment {
         [string]$Content
     )
     
-    $apiUrl = "$BaseUrl/api/data/v6.0/db/$DatabaseId/elements/$ElementId/attachments"
+    $apiUrl = "$BaseUrl/api/data/v6.0/db/$DatabaseId/elements/$ElementId/attachments?forceCheckout=1"
     
     $headers = @{
         "Authorization" = "Bearer $AccessToken"

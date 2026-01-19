@@ -62,10 +62,14 @@ $workflowConfig = @{
     FormTypeGuid = $config.Workflow.FormTypeGuid
     Path = if ($config.Workflow.Path) { $config.Workflow.Path } else { "default" }
     Mode = if ($config.Workflow.Mode) { $config.Workflow.Mode } else { "standard" }
+    BusinessEntityGuid = if ($config.Workflow.BusinessEntityGuid) { $config.Workflow.BusinessEntityGuid } else { "" }
 }
 
 Write-Host "Workflow Guid: $($workflowConfig.WorkflowGuid)" -ForegroundColor Green
 Write-Host "Form Type Guid: $($workflowConfig.FormTypeGuid)" -ForegroundColor Green
+if ($workflowConfig.BusinessEntityGuid -and $workflowConfig.BusinessEntityGuid.Trim() -ne "") {
+    Write-Host "Business Entity Guid: $($workflowConfig.BusinessEntityGuid)" -ForegroundColor Green
+}
 
 # Step 3: Read field mappings from Data sheet (rows 1-4)
 Write-Host "`nReading field mappings from Data sheet (rows 1-4)..." -ForegroundColor Yellow
@@ -383,20 +387,32 @@ foreach ($row in $rows) {
                         # Format: "id#name"
                         $choiceId = $matches[1].Trim()
                         $choiceName = $matches[2].Trim()
-                        Write-Host "  Choice field value: id='$choiceId', name='$choiceName'" -ForegroundColor Gray
+                        
+                        # Only include id if it's not empty
+                        if ($choiceId -ne "") {
+                            Write-Host "  Choice field value: id='$choiceId', name='$choiceName'" -ForegroundColor Gray
+                            $choiceObj = @{
+                                id = $choiceId
+                                name = $choiceName
+                            }
+                        } else {
+                            Write-Host "  Choice field value: name='$choiceName' (id is empty, not including)" -ForegroundColor Gray
+                            $choiceObj = @{
+                                name = $choiceName
+                            }
+                        }
                     } else {
-                        # Single value - use as id, leave name blank
-                        $choiceId = $excelValueStr.Trim()
-                        $choiceName = ""
-                        Write-Host "  Choice field value: id='$choiceId', name='' (blank)" -ForegroundColor Gray
-                    }
-                    
-                    $fieldValue = @(
-                        @{
-                            id = $choiceId
+                        # Single value - treat as name only (don't include id property)
+                        $choiceName = $excelValueStr.Trim()
+                        Write-Host "  Choice field value: name='$choiceName' (no id property)" -ForegroundColor Gray
+                        
+                        # Build choice object with only name (no id property)
+                        $choiceObj = @{
                             name = $choiceName
                         }
-                    )
+                    }
+                    
+                    $fieldValue = @($choiceObj)
                     $svalueStr = $excelValueStr  # Keep original string for svalue
                 }
                 elseif ($isBooleanField) {
@@ -594,17 +610,29 @@ foreach ($row in $rows) {
                                 if ($excelValueStr -match "^\s*([^#]+)\s*#\s*(.+)\s*$") {
                                     $choiceId = $matches[1].Trim()
                                     $choiceName = $matches[2].Trim()
+                                    
+                                    # Only include id if it's not empty
+                                    if ($choiceId -ne "") {
+                                        $choiceObj = @{
+                                            id = $choiceId
+                                            name = $choiceName
+                                        }
+                                    } else {
+                                        $choiceObj = @{
+                                            name = $choiceName
+                                        }
+                                    }
                                 } else {
-                                    $choiceId = $excelValueStr.Trim()
-                                    $choiceName = ""
-                                }
-                                
-                                $cellValue = @(
-                                    @{
-                                        id = $choiceId
+                                    # Single value - treat as name only (don't include id property)
+                                    $choiceName = $excelValueStr.Trim()
+                                    
+                                    # Build choice object with only name (no id property)
+                                    $choiceObj = @{
                                         name = $choiceName
                                     }
-                                )
+                                }
+                                
+                                $cellValue = @($choiceObj)
                                 $svalueStr = $excelValueStr
                             }
                             elseif ($isBooleanField) {
@@ -708,6 +736,7 @@ foreach ($row in $rows) {
                                                   -DatabaseId $config.Webcon.DatabaseId `
                                                   -WorkflowGuid $workflowConfig.WorkflowGuid `
                                                   -FormTypeGuid $workflowConfig.FormTypeGuid `
+                                                  -BusinessEntityGuid $workflowConfig.BusinessEntityGuid `
                                                   -FormFields $formFields `
                                                   -ItemLists $itemLists `
                                                   -Path $workflowConfig.Path `

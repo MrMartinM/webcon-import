@@ -86,6 +86,9 @@ function Start-WebconWorkflow {
     .PARAMETER Mode
     Mode parameter (default: "standard")
     
+    .PARAMETER BusinessEntityGuid
+    Optional business entity GUID to set on the element
+    
     .EXAMPLE
     Start-WebconWorkflow -BaseUrl "https://..." -AccessToken $token -DatabaseId 9 -WorkflowGuid "..." -FormTypeGuid "..." -FormFields $fields
     #>
@@ -116,7 +119,10 @@ function Start-WebconWorkflow {
         [string]$Path = "default",
         
         [Parameter(Mandatory=$false)]
-        [string]$Mode = "standard"
+        [string]$Mode = "standard",
+        
+        [Parameter(Mandatory=$false)]
+        [string]$BusinessEntityGuid
     )
     
     $apiUrl = "$BaseUrl/api/data/v6.0/db/$DatabaseId/elements"
@@ -137,6 +143,13 @@ function Start-WebconWorkflow {
             guid = $FormTypeGuid
         }
         formFields = $FormFields
+    }
+    
+    # Add businessEntity if provided
+    if ($BusinessEntityGuid -and $BusinessEntityGuid.Trim() -ne "") {
+        $body.businessEntity = [ordered]@{
+            guid = $BusinessEntityGuid
+        }
     }
     
     # Add itemLists if provided
@@ -299,6 +312,9 @@ function Start-WebconWorkflowWithRetry {
     .PARAMETER Mode
     Mode parameter (default: "standard")
     
+    .PARAMETER BusinessEntityGuid
+    Optional business entity GUID to set on the element
+    
     .PARAMETER MaxRetries
     Maximum number of retry attempts (default: 3)
     
@@ -338,6 +354,9 @@ function Start-WebconWorkflowWithRetry {
         [string]$Mode = "standard",
         
         [Parameter(Mandatory=$false)]
+        [string]$BusinessEntityGuid,
+        
+        [Parameter(Mandatory=$false)]
         [int]$MaxRetries = 3,
         
         [Parameter(Mandatory=$false)]
@@ -357,7 +376,8 @@ function Start-WebconWorkflowWithRetry {
                                            -FormFields $FormFields `
                                            -ItemLists $ItemLists `
                                            -Path $Path `
-                                           -Mode $Mode
+                                           -Mode $Mode `
+                                           -BusinessEntityGuid $BusinessEntityGuid
             
             if ($attempt -gt 0) {
                 Write-Host "Workflow started successfully on attempt $($attempt + 1)" -ForegroundColor Green

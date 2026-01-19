@@ -30,6 +30,7 @@ This document contains detailed technical information about the Webcon PowerShel
   "Workflow": {
     "WorkflowGuid": "your-workflow-guid-here",
     "FormTypeGuid": "your-form-type-guid-here",
+    "BusinessEntityGuid": "",
     "Path": "default",
     "Mode": "standard"
   },
@@ -62,6 +63,7 @@ This document contains detailed technical information about the Webcon PowerShel
 ### Workflow Settings
 - `WorkflowGuid`: The GUID of the workflow to start
 - `FormTypeGuid`: The GUID of the form type
+- `BusinessEntityGuid`: Optional business entity GUID to set on the element
 - `Path`: Path parameter (default: "default" if not provided)
 - `Mode`: Mode parameter (default: "standard" if not provided)
 
@@ -317,6 +319,7 @@ setx WEBCON_CLIENT_SECRET "your-client-secret-here"
   "Workflow": {
     "WorkflowGuid": "your-workflow-guid-here",
     "FormTypeGuid": "your-form-type-guid-here",
+    "BusinessEntityGuid": "",
     "Path": "default",
     "Mode": "standard"
   },

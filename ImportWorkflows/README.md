@@ -27,6 +27,7 @@ Edit `Config.json`:
   "Workflow": {
     "WorkflowGuid": "your-workflow-guid-here",
     "FormTypeGuid": "your-form-type-guid-here",
+    "BusinessEntityGuid": "",
     "Path": "default",
     "Mode": "standard"
   },
